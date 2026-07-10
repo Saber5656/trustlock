@@ -24,34 +24,45 @@ honest about gaps.
 
 ## Detailed Requirements
 
-1. `types.ts` — transcribe DESIGN §9.1 exactly (`SignalStatus`,
-   `SignalCategory`, `Evidence`, `Signal`, `Collector`) plus:
+1. `types.ts` — transcribe DESIGN §9.1 exactly: `SignalStatus`,
+   `SignalCategory`, `Evidence`, `Signal`, `Collector`, and the normative
+   `SignalContext` from DESIGN §9.1 — including
+   `subject: { ecosystem, name, version, osvEcosystem, depsDevSystem,
+   registryPageUrl }`, `abortSignal: AbortSignal`, and
+   `infra: { depsdev, osv, github, downloads, offline, log }` where the
+   client fields are **structural interfaces declared in this file**
+   (`DepsDevLike`, `OsvLike`, `GitHubLike`, `DownloadsFacade =
+   { fetch(): Promise<{ period: string; count: number; evidenceUrl: string } | null> }`)
+   so this issue has no dependency on issues 16–18 — the concrete clients
+   satisfy the interfaces structurally. `TopPackagesIndex` uses the
+   issue-27 shape:
+   `{ has(name): boolean; all(): readonly string[]; count: number,
+   source: { name: string; url: string } }` (nearest-name search lives in
+   issue 28, not here). Plus:
    ```ts
-   interface SignalContext {
-     subject: { ecosystem: EcosystemId; name: string; version: string };
-     facts: PackageFacts;
-     infra: { depsdev: DepsDevClient; osv: OsvClient; github: GitHubClient;
-              http: CachedHttp; offline: boolean; log: Logger };
-     topPackages: TopPackagesIndex;       // defined in issue 27; use a
-                                          // structural placeholder type
-                                          // { has(name): boolean; nearest(name): {name, distance} | null }
-   }
    const SIGNAL_CATALOG: readonly string[]; // the 22 ids from DESIGN §9.2
    ```
-2. Orchestrator `collectSignals(collectors, ctx, opts?): Promise<Signal[]>`:
+2. Orchestrator `collectSignals(collectors, adapter, ctx, opts?): Promise<Signal[]>`:
+   - **validates the collector set synchronously before starting any
+     collector**: duplicate signal id across collectors ⇒ `InternalError`;
+   - pre-marks every id in `adapter.notApplicableSignals` as
+     `skipped(not-applicable)` and excludes those ids from collector
+     routing (DESIGN §9.1) — collectors never see them;
    - concurrency limit 4 (simple semaphore; no new dependency);
-   - per-collector timeout `opts.timeoutMs ?? 10_000` via `Promise.race` +
-     AbortSignal passed in ctx for cooperative cancellation (collectors may
-     ignore it; race result decides);
+   - per-collector timeout `opts.timeoutMs ?? 10_000` via `Promise.race`;
+     each collector run gets a fresh `AbortController` whose signal is
+     placed in `ctx.abortSignal` for cooperative cancellation (collectors
+     may ignore it; the race result decides);
    - collector throws / times out ⇒ every id in `collector.produces` becomes
-     `{ status: "unavailable", unavailableReason: <ErrorClass or "timeout">, evidence: [] }`;
+     `{ status: "unavailable", unavailableReason, evidence: [] }` with the
+     deterministic reason mapping: timeout ⇒ `"timeout"`; a `VetlockError`
+     ⇒ its class name (e.g. `"OfflineMissError"`); any other thrown value
+     (strings, plain objects, non-VetlockError Errors) ⇒ `"unknown-error"`;
    - collector resolves but omits a declared id ⇒ orchestrator fills the
      gap the same way (`unavailableReason: "collector-gap"`) and logs warn
      (bug indicator);
    - collector emits an undeclared id ⇒ dropped + warn (contract
      enforcement);
-   - duplicate id across collectors ⇒ `InternalError` at registration time
-     (validate the collector set before running);
    - output sorted by signal id (ascending, `localeCompare("en")`).
 3. Status semantics (normative, for all collector issues):
    - `evaluated` — data obtained, value present, ≥1 evidence entry;
@@ -70,9 +81,14 @@ honest about gaps.
 - [ ] Stub-collector tests: happy path, throwing collector, timeout (fake
       timers), gap-fill, undeclared-id drop, duplicate-id registration
       error, ordering, concurrency ≤ 4 (max-in-flight counter assertion).
-- [ ] A run with zero collectors yields all-catalog `unavailable` output
-      (bootstrap behavior) — proves completeness invariant independent of
-      collectors.
+- [ ] A run with zero collectors yields all-catalog output: adapter
+      `notApplicableSignals` as `skipped`, everything else `unavailable`
+      (bootstrap behavior) — proves completeness independent of collectors.
+- [ ] Pre-marking: a stub adapter declaring two not-applicable ids ⇒ those
+      ids `skipped` even when a collector also declares them (collector
+      not routed those ids).
+- [ ] Reason mapping: timeout ⇒ "timeout"; `OfflineMissError` ⇒
+      "OfflineMissError"; thrown string ⇒ "unknown-error".
 - [ ] `SIGNAL_CATALOG` matches DESIGN §9.2 exactly (22 ids; test pins the
       list literally so any change is a conscious diff).
 - [ ] No collector error can reject `collectSignals` (fuzz: collectors that
@@ -80,7 +96,7 @@ honest about gaps.
 
 ## Validation
 
-- `npm test -- signals/orchestrator`.
+- `npm run lint && npm run typecheck && npm test -- signals/orchestrator`.
 
 ## Dependencies
 

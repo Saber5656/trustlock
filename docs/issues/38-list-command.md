@@ -25,9 +25,12 @@ reviews ("what have we approved?") and by agents (`--json`).
    (values validated ⇒ `UsageError` otherwise; both combinable).
 3. Terminal output: one line per entry, ledger order (already canonical):
    `npm  left-pad@1.3.0   approved  2026-07-08  Yasushi Takagi  "small, zero deps"`
-   — columns: ecosystem, name@version, decision, reviewedAt date part,
-   reviewedBy, quoted reason (truncated 60 chars, sanitized). Footer:
-   `12 entries (10 approved, 2 rejected)` reflecting filters.
+   — columns: ecosystem, name@version, decision, reviewedAt date part
+   (`reviewedAt.slice(0, 10)` on the validated UTC ISO string — no local
+   `Date` formatting), reviewedBy, quoted reason (truncated 60 chars,
+   sanitized; absent reason renders as `-`). Footer:
+   `12 entries (10 approved, 2 rejected)` reflecting filters; empty result
+   renders exactly `0 entries (0 approved, 0 rejected)`.
 4. `--format json`: `{ schemaVersion: 1, ledgerPath, entries: [...],
    summary: { approved, rejected, total } }` — entries are the raw ledger
    entries (already-validated shapes; unknown keys included).
@@ -39,14 +42,17 @@ reviews ("what have we approved?") and by agents (`--json`).
 
 - [ ] Golden terminal + JSON outputs for the issue-35 golden ledger.
 - [ ] Filter matrix: decision-only, ecosystem-only, both, no-match (empty
-      table + `0 entries` footer, exit 0).
+      table + `0 entries (0 approved, 0 rejected)` footer, exit 0).
 - [ ] Corrupt ledger exit 2; missing ledger exit 2 with hint.
 - [ ] Hostile reason string (ANSI) renders sanitized in terminal, raw in
-      JSON.
+      JSON; absent reason renders `-`.
+- [ ] Read-only proof: tests run with a throwing HttpClient and a
+      write-spying fs — zero network calls, zero writes, zero child
+      processes (S1/S2/S7 posture for a read-only command).
 
 ## Validation
 
-- `npm test -- cmd-list`.
+- `npm run lint && npm run typecheck && npm test -- cmd-list`.
 
 ## Dependencies
 

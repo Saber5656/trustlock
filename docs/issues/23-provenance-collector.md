@@ -31,33 +31,37 @@ valuable positive evidence shown in reports.
    - fact present ⇒ `evaluated` (for both present:true and present:false —
      "no attestations" is a real answer from a 404);
    - fact absent (adapter couldn't reach the endpoint) ⇒
-     `unavailable(no-registry-data)`.
-4. Evidence:
-   - npm present: summary
-     `"Registry-verified provenance attestation found (<kinds>)."` with URL
-     `https://www.npmjs.com/package/<name>/v/<version>` (provenance section);
-   - PyPI present: include `publisherIdentity` when known:
-     `"PEP 740 attestation present; published via Trusted Publishing from github:owner/repo."`
-     URL: `https://pypi.org/project/<name>/<version>/`;
-   - absent: `"No provenance attestation found for this version."` + same
-     registry URL.
+     `unavailable(no-registry-data)` with evidence summary
+     `"Could not query the attestation endpoint."`.
+4. Evidence (normative; `evidence.url` = `ctx.subject.registryPageUrl`):
+   - present WITH `publisherIdentity`:
+     `"Provenance attestation present (<kinds>); published via Trusted Publishing from <publisherIdentity>."`;
+   - present WITHOUT identity (value keeps
+     `publisherIdentity: undefined`):
+     `"Registry-verified provenance attestation found (<kinds>)."`;
+   - absent: `"No provenance attestation found for this version."`.
 
 ## Acceptance Criteria
 
-- [ ] npm present / npm absent / PyPI present-with-identity / PyPI absent /
-      fact-missing ⇒ statuses and values exactly as specified (5 tests).
+- [ ] present-with-identity / present-without-identity / absent /
+      fact-missing ⇒ statuses, values, AND exact evidence summaries + URL
+      as specified (golden-style assertions, 4+ tests across both
+      ecosystems' fixtures).
 - [ ] `kinds` array passed through verbatim; unknown kinds don't error.
-- [ ] No network calls (collector receives no http client — compile-level
-      guarantee: constructor takes nothing but the DESIGN ctx and uses only
-      `ctx.facts`).
+- [ ] No network: `createProvenanceCollector(): Collector` is a no-arg
+      factory; `collect(ctx)` reads only `ctx.facts.attestations` and
+      `ctx.subject`; a test asserts the module imports no infra/client
+      modules (grep-level, mirroring the architecture-guard technique) and
+      a spying ctx proves zero `ctx.infra` member access.
 
 ## Validation
 
-- `npm test -- collectors/provenance`.
+- `npm run lint && npm run typecheck && npm test -- collectors/provenance`.
 
 ## Dependencies
 
-- 19; facts from 11/15.
+- 19, 11, 15 (attestation facts from both adapters).
+  (ISSUE_PLAN table: 19, 11, 15.)
 
 ## Non-goals
 

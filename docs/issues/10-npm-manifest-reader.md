@@ -24,6 +24,10 @@ distinguish "no lockfile" from "dep missing from lockfile".
 
 1. `detectNpmProject(dir): Promise<boolean>` — true iff `package.json`
    exists and parses as a JSON object.
+   **S6 file limits**: `package.json` reads are capped at 5 MiB and
+   `package-lock.json` at 50 MiB (larger ⇒ `ProjectError` for the manifest;
+   lockfile treated as absent + warn). All parsed dependency/lockfile
+   indexes are built as null-prototype maps keyed by name.
 2. `readNpmDirectDependencies(dir): Promise<DirectDependency[]>`:
    - Parse `package.json`; collect entries from `dependencies` → group
      `prod`, `devDependencies` → `dev`, `optionalDependencies` → `optional`.
@@ -37,9 +41,11 @@ distinguish "no lockfile" from "dep missing from lockfile".
    - Non-registry ranges (`file:`, `link:`, `git+…`, `github:`,
      `workspace:`, http(s) tarball URLs) — normative rule: return the dep
      with its computed `group`, `resolvedVersion: undefined`, and
-     `lockPresent` reflecting actual lockfile presence. Verify will surface
-     them as `unapproved`; approving non-registry dependencies is out of
-     scope for v1 (documented again in issues 37 and 41).
+     `lockPresent: true` **only when the lockfile contains that
+     dependency's `packages["node_modules/<name>"]` entry** (file-level
+     lockfile existence alone is NOT enough), else `false`. Verify will
+     surface them as `unapproved`; approving non-registry dependencies is
+     out of scope for v1 (documented again in issues 37 and 41).
    - Lockfile: read `package-lock.json` if present.
      `lockfileVersion` ∈ {2,3} required; 1/absent/unparsable ⇒ all deps get
      `lockPresent: false` (and one `warn` explaining: "regenerate with
@@ -66,15 +72,24 @@ distinguish "no lockfile" from "dep missing from lockfile".
       object prototype not polluted (explicit assertion), no throw.
 - [ ] Fixture `npm-workspaces` ⇒ root deps returned + workspaces warn.
 - [ ] Dep in lockfile but not manifest is NOT returned (direct deps only).
+- [ ] Non-registry scheme table test: one dep per scheme (`file:`, `link:`,
+      `git+https:`, `github:`, `workspace:`, `https://…tgz`) asserting
+      `resolvedVersion: undefined`, per-entry `lockPresent`, and zero
+      network.
+- [ ] Corrupt `package-lock.json` (syntax error) ⇒ one warn, all deps
+      `lockPresent: false`, no throw.
+- [ ] Oversized files: >5 MiB manifest ⇒ `ProjectError`; >50 MiB lockfile
+      ⇒ treated as absent + warn (fixtures generated in-test).
 
 ## Validation
 
-- `npm test -- npm/manifest`; fixtures committed under
+- `npm run lint && npm run typecheck && npm test -- npm/manifest`; fixtures committed under
   `test/fixtures/projects/`.
 
 ## Dependencies
 
 - 07 (types), 08 (name validation), 03 (errors/log).
+  (ISSUE_PLAN table lists the same.)
 
 ## Non-goals
 

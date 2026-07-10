@@ -25,6 +25,11 @@ on it; the cache (issue 05) wraps it.
 2. `interface HttpClient { getJson(url, opts?): Promise<HttpJsonResult>; postJson(url, body, opts?): Promise<HttpJsonResult> }`
    where `HttpJsonResult = { status: number; etag?: string; body: unknown }`
    and `opts = { headers?, etag? (sends If-None-Match), timeoutMs?, allow404?: boolean }`.
+   `postJson` construction: body = `JSON.stringify(body)`, headers
+   `Content-Type: application/json` and `Accept: application/json` set by
+   default; caller-provided `opts.headers` are merged on top and win on
+   key conflict (case-insensitive), except `Authorization` which is always
+   owned by the client (caller values ignored + debug log).
 3. `createHttpClient(deps: { fetchImpl?: typeof fetch; token?: string; userAgent: string })`
    — `fetchImpl` injectable for tests; `token` attached as
    `Authorization: Bearer <token>` **only** when `new URL(url).host === "api.github.com"`.
@@ -42,9 +47,10 @@ on it; the cache (issue 05) wraps it.
    - Response body read as a stream, counting bytes; abort and throw
      `ResponseTooLargeError` beyond 5 MiB (5 * 1024 * 1024).
    - `status 304` returns `{ status: 304 }` without body; `404` returns
-     normally only when `opts.allow404`, else throws `RegistryError`-agnostic
-     `NetworkError` subclass? — **No**: throw plain `NetworkError` with
-     status; semantic mapping to `RegistryError` happens in callers.
+     normally only when `opts.allow404`, else throws `NetworkError` with
+     `status: 404` set (semantic mapping to `RegistryError` happens in
+     callers). Other non-2xx statuses (after retry policy) likewise throw
+     `NetworkError` carrying the status.
    - JSON parse failures ⇒ `NetworkError("invalid JSON from <host>")`.
 5. No cookies, no keepalive config beyond defaults, no proxy code (undici's
    env-proxy behavior is left as-is and documented in a comment).
@@ -63,10 +69,16 @@ on it; the cache (issue 05) wraps it.
 - [ ] 6 MiB fixture body throws `ResponseTooLargeError` before full read.
 - [ ] Token attached for `api.github.com` only (positive + negative test).
 - [ ] ETag round-trip: `etag` opt sends `If-None-Match`; 304 handled.
+- [ ] Timeout: default 10_000 ms enforced (fake timers: request aborts and
+      throws `NetworkError`), `opts.timeoutMs` override respected.
+- [ ] `User-Agent` present on every request (captured-request assertion,
+      GET and POST).
+- [ ] S5: with an injected fake logger at debug level, no log line contains
+      the token value or any `Authorization` header content.
 
 ## Validation
 
-- `npm test -- http` green; tests use only injected fakes (no sockets).
+- `npm run lint && npm run typecheck && npm test -- http` green; tests use only injected fakes (no sockets).
 - Include a test that iterates `ALLOWED_HOSTS` and asserts each parses as a
   bare hostname (no scheme/port/path) — guards accidental weakening.
 

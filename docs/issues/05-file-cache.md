@@ -32,7 +32,10 @@ security surface: keys must be hashed (S3) and contents are public data only
    `<cacheDir>/v1/<sha256(method + " " + url)>.json` containing
    `{ url, fetchedAt (ISO), etag?, status, body }`. The `v1/` segment allows
    future format migration by directory bump.
-3. `CachedHttp.getJson(url, { ttlMs, offline })` behavior:
+3. `CachedHttp.getJson(url, { ttlMs, offline, allow404? })` — `allow404`
+   is passed through to the underlying `HttpClient` (issue 04) and a 404
+   result is cached (negative caching) only when `allow404: true`.
+   Behavior:
    - offline=false: fresh entry (age < ttlMs) ⇒ return cached; stale with
      etag ⇒ conditional GET (304 ⇒ refresh `fetchedAt`, return cached; 200 ⇒
      rewrite entry); stale without etag ⇒ plain GET and rewrite; network
@@ -64,15 +67,20 @@ security surface: keys must be hashed (S3) and contents are public data only
 - [ ] Same URL cached under GET and POST(body) never collide.
 - [ ] `resolveCacheDir` table test covers all three platforms + both env
       overrides.
+- [ ] Permissions: cache dir created `0o700` and entry files `0o600`
+      (asserted on POSIX; skipped-with-comment on Windows).
+- [ ] Atomicity: injected rename failure leaves the previous entry intact;
+      successful write leaves no `.tmp` file behind.
 
 ## Validation
 
-- `npm test -- cache paths`; tests run against `fs` in a temp dir
+- `npm run lint && npm run typecheck && npm test -- cache paths`; tests run against `fs` in a temp dir
   (`fs.mkdtemp`), no network.
 
 ## Dependencies
 
-- 01, 03 (errors), 04 (HttpClient interface).
+- 01, 03 (error classes), 04 (HttpClient interface).
+  (ISSUE_PLAN table lists the same three.)
 
 ## Non-goals
 

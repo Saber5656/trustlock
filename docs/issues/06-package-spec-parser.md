@@ -29,26 +29,30 @@ changes here.
    interface SpecInput { raw: string; ecosystemFlag?: EcosystemId; cwd: string }
    async function parseSpec(input: SpecInput, registry: EcosystemRegistry): Promise<ParsedSpec>
    ```
-2. Grammar (DESIGN §6.1):
-   - Optional prefix `npm:` / `pypi:` (exact, lowercase; unknown prefix that
-     matches `/^[a-z][a-z0-9]*:/` ⇒ `UsageError` listing supported
-     ecosystems; note: a leading `@` never starts a prefix — `@scope/x` is
-     an npm scoped name).
+2. Grammar (DESIGN §6.1) — implemented ecosystem-agnostically (P6): the
+   set of valid prefixes is `registry.all().map(a => a.id + ":")`, never a
+   hardcoded list; this module contains no ecosystem-id literals (the
+   issue-07 architecture guard covers it):
+   - Optional `<id>:` prefix (exact, lowercase). An unknown prefix matching
+     `/^[a-z][a-z0-9]*:/` ⇒ `UsageError` listing the registered ecosystem
+     ids (built from the registry). A leading `@` never starts a prefix —
+     `@scope/x` is a scoped name owned by whichever adapter accepts it.
    - Remainder passed to `adapter.parseSpecBody(body)`; the adapter splits
-     name vs version (`@` for npm respecting the scope `@`; `==` or `@` for
-     PyPI).
+     name vs version per its own grammar.
 3. Ecosystem resolution order (DESIGN §6.2): prefix → `ecosystemFlag` → 
    project detection: call `adapter.detectProject(cwd)` for every registered
    adapter; exactly one true ⇒ that adapter; zero or >1 ⇒ `UsageError`
    with message showing both explicit forms
    (`vetlock check npm:<name>` / `--ecosystem pypi`).
    Conflict rule: if prefix and flag are both present and disagree ⇒
-   `UsageError` (never silently prefer one).
+   `UsageError` (never silently prefer one). Error messages show the
+   explicit forms generically (`vetlock check <ecosystem>:<name>` /
+   `--ecosystem <id>`), listing registered ids from the registry.
 4. After the split: `adapter.validateName(name)` must pass; result carries
-   the **normalized** name (PEP 503 for pypi, unchanged-but-checked for
-   npm). Version, when present, is syntax-checked by the adapter
-   (`UsageError` if a range/non-exact version is supplied — message: exact
-   versions only, show example).
+   the **normalized** name. Version, when present, is checked via
+   `adapter.validateExactVersion(raw)` (DESIGN §7.1) — failure ⇒
+   `UsageError` ("exact versions only", including the adapter's reason and
+   an example built from the parsed name).
 5. Error messages must include the offending input **escaped** via the
    sanitizer once it exists; until issue 33 lands, use `JSON.stringify`
    (leave a `TODO(sanitize)` comment referencing issue 33).
@@ -65,12 +69,16 @@ changes here.
       `foo@`, `@`, empty, 301-char spec.
 - [ ] Zero-manifest cwd without prefix/flag ⇒ `UsageError` naming both
       explicit options; two-manifest cwd likewise (distinct message).
-- [ ] No URL or filesystem access happens in this module (pure).
+- [ ] `spec.ts` performs no direct URL or filesystem access; project
+      detection is delegated exclusively through `registry.detect(cwd)`
+      (adapters are stubbed in tests).
+- [ ] `spec.ts` contains no ecosystem-id string literals (architecture
+      guard from issue 07 covers this file; tests may use literals).
 - [ ] All returned names are normalized (asserted per adapter).
 
 ## Validation
 
-- `npm test -- spec`; property-style fuzz test: 1,000 random ASCII strings
+- `npm run lint && npm run typecheck && npm test -- spec`; property-style fuzz test: 1,000 random ASCII strings
   must either parse or throw `UsageError` — never any other error class.
 
 ## Dependencies

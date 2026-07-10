@@ -42,7 +42,13 @@ must use the corresponding escape literals, never raw control bytes.
    - `"\x1b]0;evil-title\x07text"` → `"text"`
    - `"safe"` → `"safe"` (idempotent on clean input)
 2. `render-terminal.ts`:
-   `renderTerminal(report, opts: { color: boolean; quiet?: boolean; asciiGlyphs?: boolean }): string`
+   `renderTerminal(report, opts: { color: boolean; quiet?: boolean;
+   asciiGlyphs?: boolean; offline?: boolean }): string` — `offline` drives
+   the footer cache note (the CLI layer passes it; the renderer reads no
+   env). When `opts.color === true`, style via
+   `util.styleText(..., { validateStream: false })` so output is
+   byte-stable regardless of the attached stream; when `false`, no
+   styleText calls at all.
    - Layout (top to bottom):
      1. header: `<name>@<version> (<ecosystem displayName>)` + verdict badge
         `PASS` (green) / `WARN` (yellow) / `FAIL` (red) via
@@ -78,22 +84,28 @@ must use the corresponding escape literals, never raw control bytes.
       truncation with `…`, empty string.
 - [ ] Golden terminal outputs (color, no-color, quiet, asciiGlyphs) for the
       issue-32 golden reports — byte-stable snapshots.
-- [ ] Hostile-report test: every string field of a synthetic report carries
-      `"\x1b[2J\x1b]0;pwn\x07"` payloads; with `color: false` the output has
-      no `\x1b`/`\x9b`/`\x07` bytes; with `color: true` the only escape
-      bytes present are those emitted by `util.styleText` (assert by
-      running the same render with color:false and comparing
-      styleText-stripped outputs for equality).
+- [ ] Hostile-report test: every FREE-FORM untrusted string field of a
+      synthetic report carries `"\x1b[2J\x1b]0;pwn\x07"` payloads — the
+      poisoned fields are exactly: `subject.name`,
+      `subject.resolvedVersion`, `subject.registryUrl`, finding `title`
+      and `detail`, `evidence.summary` and `evidence.url`,
+      `unavailableReason` (enum/discriminant fields like `verdict`,
+      `severity`, `outcome`, `ecosystem`, `policy.failOn` stay valid).
+      With `color: false` the output has no `\x1b`/`\x9b`/`\x07` bytes;
+      with `color: true` the only escape bytes present are those emitted
+      by `util.styleText` (assert by comparing the styleText-stripped
+      color output with the color:false output for equality).
 - [ ] Category grouping order pinned by a golden test.
 - [ ] Renderer purity: no `process.*` reads (grep test).
 
 ## Validation
 
-- `npm test -- sanitize render-terminal`.
+- `npm run lint && npm run typecheck && npm test -- sanitize render-terminal`.
 
 ## Dependencies
 
-- 32 (Report model), 03 (Node baseline provides `util.styleText`).
+- 32 (Report model). (`util.styleText` comes from the Node ≥ 22.12
+  baseline set in issue 01 — no issue-03 dependency; ISSUE_PLAN table: 32.)
 
 ## Non-goals
 

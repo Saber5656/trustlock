@@ -37,6 +37,8 @@ assume this layout and these scripts.
    - `"bin": { "vetlock": "dist/cli/index.js" }` (target created in issue 03;
      the path may not exist yet — that is acceptable for now).
    - `"files": ["dist", "data", "README.md", "LICENSE"]`.
+   - `"exports": { "./package.json": "./package.json" }` (deep-import
+     lockdown from day one; only `bin` is public API — DESIGN §19).
    - `description`: `Vet a package before adding it: evidence-based trust
      checks plus a committable approval ledger.`
    - `repository`, `bugs`, `homepage` pointing at
@@ -63,20 +65,34 @@ assume this layout and these scripts.
    `"forbidden unused"`: enable `noUnusedLocals` and `noUnusedParameters`.
    `include: ["src"]` (tests are type-checked by vitest, excluded from build).
 3. ESLint flat config: `@eslint/js` recommended + `typescript-eslint`
-   recommendedTypeChecked for `src/**`; add rule
-   `"no-restricted-imports"` banning `child_process` and
-   `node:child_process` everywhere except `src/infra/git.ts` (S1 — the file
-   itself is created in issue 36; configure the exception now).
+   recommendedTypeChecked for `src/**`; enforce S1 for `src/**` with
+   `src/infra/git.ts` as the sole exception (the file itself is created in
+   issue 36; configure the exception now). The ban must cover ALL access
+   paths: `no-restricted-imports` for `child_process`/`node:child_process`
+   (static imports), plus `no-restricted-syntax` selectors for dynamic
+   `import("child_process"|"node:child_process")`,
+   `require("child_process"|"node:child_process")`, and
+   `createRequire`-based access (ban `module.createRequire` usage in
+   `src/**` entirely — nothing in shipped code needs it except a possibly
+   documented package.json read in `version.ts`, which must use
+   `fs.readFileSync` instead). `test/**` and `scripts/**` are exempt from
+   this rule (their child-process use is constrained by DESIGN §16.3:
+   argv-array `execFile`, no shell).
 4. `.gitignore`: `node_modules/`, `dist/`, `coverage/`, `*.tsbuildinfo`,
    `.DS_Store`.
 5. `.nvmrc`: `22.12.0`. `.editorconfig`: 2-space indent, LF, UTF-8, final
    newline.
 6. `LICENSE`: MIT, copyright holder `vetlock contributors`, year 2026.
 7. Commit `package-lock.json` (run `npm install`).
-8. Placeholder `src/infra/version.ts`: export
-   `TOOL_NAME = "vetlock"` and `TOOL_VERSION` read from
-   `process.env.npm_package_version ?? "0.0.0-dev"`; unit test asserts both
-   exports exist and `TOOL_NAME === "vetlock"`.
+8. Placeholder `src/infra/version.ts`: export `TOOL_NAME = "vetlock"` and
+   `TOOL_VERSION` resolved at module load by reading the package's own
+   `package.json` via
+   `JSON.parse(fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version`
+   wrapped in try/catch with fallback `"0.0.0-dev"` (works for `npx`,
+   global installs, and local dev; `process.env.npm_package_version` is NOT
+   reliable outside npm scripts and must not be used). Unit test asserts
+   `TOOL_NAME === "vetlock"` and `TOOL_VERSION` matches
+   `/^\d+\.\d+\.\d+/ or the fallback`.
 
 ## Acceptance Criteria
 
@@ -87,8 +103,9 @@ assume this layout and these scripts.
       prints `vetlock` after build.
 - [ ] Runtime `dependencies` in package.json are exactly
       `commander`, `zod`, `semver`, `smol-toml`.
-- [ ] ESLint fails a file that imports `node:child_process` (prove with a
-      temporary fixture test or eslint unit run in CI—see Validation).
+- [ ] ESLint fails `src/` snippets using each banned path: static import,
+      dynamic `import()`, `require()`, and `createRequire` (four cases in
+      the lint-guards test); the same snippets pass under `test/**`.
 - [ ] No install scripts (`preinstall`/`install`/`postinstall`) exist in
       package.json.
 

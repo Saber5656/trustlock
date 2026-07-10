@@ -60,27 +60,50 @@ version fails the build with actionable remediation output.
       detected ⇒ `ProjectError` ("no supported manifests found: expected
       package.json or pyproject.toml");
    3. `readDirectDependencies` per adapter (warnings from readers pass
-      through to stderr); `--prod-only` filters npm `group !== "prod"`
-      after reading (PyPI optional groups included unless `--prod-only`,
-      which keeps only `prod` for it too — uniform semantics);
+      through to stderr); `--prod-only` keeps only `group === "prod"`
+      deps, uniformly for every ecosystem (DESIGN §5.3);
    4. `findLedger`/`loadLedger` — missing ledger ⇒ exit 2 with hint
       ("run `vetlock check` + `vetlock approve` first" — DESIGN §12.4);
    5. run engine; render; exit `hasViolations ? 1 : 0`.
 3. Terminal output (uses `sanitize` from issue 33 for all dynamic text):
-   - violations table first: columns `status | dependency | resolved |
-     hint`; hints per status:
-     `unapproved` → `vetlock check <name>@<version>`;
+   - violations table first: columns `dependency | resolved | status |
+     hint` (DESIGN §13.3 order); `resolved` shows `(unresolved)` when
+     `resolvedVersion` is undefined (non-registry deps — they classify as
+     `unapproved` by the state machine since no exact entry can match);
+     hints per status:
+     `unapproved` (resolved) → `vetlock check <name>@<version>`;
+     `unapproved` (unresolved) → `non-registry dependency — not approvable in v1`;
      `version_drift` → `approved: <versions>; vetlock check <name>@<v>`;
      `rejected` → `rejected by <reviewedBy> on <date>: <reason>`;
      `integrity_mismatch` → `approved integrity differs — investigate before trusting`;
-     `lock_missing` → the reader's guidance (regenerate lockfile);
+     `lock_missing` → `adapter.lockfileGuidance` for the dep's ecosystem
+     (DESIGN §7.1 — fixed per-ecosystem remediation string; reader
+     warnings on stderr are separate);
    - then `ok` count line (not per-row unless `--verbose`);
    - stale list (informational): `stale ledger entries: name@version …`;
    - summary line:
      `14 direct dependencies: 11 ok, 2 unapproved, 1 version drift`.
    - `integrity_mismatch` styled red/critical (it is the tampering signal).
-4. `--format json`: `{ schemaVersion: 1, results: [...], stale: [...],
-   summary: {...} }` with fixed key order (same discipline as issue 32);
+4. `--format json` — exact schema with fixed key order (same discipline
+   and non-sanitization stance as issue 32 — JSON escaping neutralizes
+   control bytes; consumers sanitize before display):
+   ```jsonc
+   {
+     "schemaVersion": 1,
+     "ledgerPath": "…",
+     "results": [ {
+       "ecosystem": "npm", "name": "…", "declaredRange": "…",
+       "group": "prod", "resolvedVersion": "…" /* or null */,
+       "status": "unapproved", "hint": "…",
+       "approvedVersions": ["…"],      // present only for version_drift
+       "ledgerEntry": { /* raw entry */ }  // present when one matched
+     } ],
+     "stale": [ /* raw ledger entries */ ],
+     "summary": { "total": 14, "ok": 11, "unapproved": 2,
+                  "version_drift": 1, "rejected": 0,
+                  "integrity_mismatch": 0, "lock_missing": 0 }
+   }
+   ```
    `markdown` format ⇒ `UsageError` ("markdown is check-only in v1").
 5. Determinism: same inputs ⇒ byte-identical output (no clock, no network).
 
@@ -95,18 +118,23 @@ version fails the build with actionable remediation output.
 - [ ] Command e2e (fixture npm project + ledger fixtures): all-approved ⇒
       exit 0; one unapproved ⇒ exit 1 + remediation hint; mixed npm+pypi
       project verifies both ecosystems in one run.
-- [ ] `--prod-only` excludes dev groups both ecosystems.
+- [ ] `--prod-only` excludes dev AND optional groups, both ecosystems.
+- [ ] Non-registry dep (from the issue-10/14 fixtures) shows
+      `(unresolved)` + the non-approvable hint, counted as `unapproved`.
+- [ ] `lock_missing` hint equals the ecosystem adapter's
+      `lockfileGuidance` string.
 - [ ] No network: engine+command tests run with a throwing HttpClient
       injected (any call fails the test).
-- [ ] JSON golden snapshot; terminal golden snapshot.
+- [ ] JSON golden snapshot (schema above); terminal golden snapshot.
 
 ## Validation
 
-- `npm test -- verify cmd-verify`.
+- `npm run lint && npm run typecheck && npm test -- verify cmd-verify`.
 
 ## Dependencies
 
-- 35, 10, 14, 33 (sanitize), 03.
+- 35, 10, 14, 07 (`lockfileGuidance`), 33 (sanitize), 03.
+  (ISSUE_PLAN table lists the same.)
 
 ## Non-goals
 

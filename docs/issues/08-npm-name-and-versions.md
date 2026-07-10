@@ -23,7 +23,8 @@ table-testable in isolation.
 ## Detailed Requirements
 
 1. `name.ts` — `validateNpmName(raw: string): NameValidation`, rules
-   (mirroring npm registry rules):
+   (DESIGN §6.3 — deliberately slightly stricter than npm's legacy
+   grammar, documented there):
    - total length 1–214 chars;
    - either unscoped `name` or scoped `@scope/name` (exactly one `/`);
    - each part matches `/^[a-z0-9][a-z0-9\-._~]*$/` — no uppercase, cannot
@@ -33,22 +34,29 @@ table-testable in isolation.
    - normalized form = input unchanged (npm names are canonical already).
    Failure reasons are specific ("uppercase not allowed", "scope missing
    name part", …).
-2. `name.ts` — `encodeNpmNameForUrl(name): string`: scoped names encode the
+2. `name.ts` — `encodeNpmNameForUrl(name): string`: **first re-validates
+   via `validateNpmName` and throws `InternalError` on failure**
+   (defense-in-depth at the URL boundary, S3); then scoped names encode the
    single `/` as `%2F` (`@scope%2Fname`); unscoped returned as-is. This is
    the ONLY place npm names are URL-encoded.
-3. `versions.ts` using the `semver` package:
+3. `versions.ts` using the `semver` package (implements the adapter's
+   `validateExactVersion` — DESIGN §7.1):
    - `parseExactVersion(raw): { ok: true; version: string } | { ok: false; reason: string }`
-     — accepts only exact semver (`semver.valid`, after `semver.clean`);
-     ranges (`^`, `~`, `>`, `x`, `*`, `||`, spaces) rejected with reason
-     "exact version required".
+     — pre-check BEFORE any cleaning: reject raw input containing
+     whitespace or any range/operator token (`^ ~ > < = x * ||`); then
+     allow an optional leading `v` (`semver.clean`) and require
+     `semver.valid` on the result. The precheck exists because
+     `semver.clean` is lenient (trims/normalizes) and must not launder
+     non-exact input.
    - `compareNpmVersions(a, b): -1|0|1` via `semver.compare`.
    - `isPrerelease(v): boolean` via `semver.prerelease(v) !== null`.
-4. `parseNpmSpecBody(body: string): { name: string; version?: string }`:
-   split on the **last** `@` that is not the leading scope `@`
-   (`@types/node@1.2.3` → name `@types/node`, version `1.2.3`;
-   `@types/node` → no version; `express@` → `UsageError`-shaped failure
-   returned as `{ ok:false }` variant or thrown per issue-06 contract —
-   follow the adapter interface signature exactly).
+4. `parseNpmSpecBody(body: string): { name: string; version?: string }` —
+   exported from `src/core/ecosystems/npm/name.ts` (the adapter delegates
+   `parseSpecBody` to it): split on the **last** `@` that is not the
+   leading scope `@`. Required cases: `express` → no version;
+   `express@5.1.0`; `@types/node` → no version; `@types/node@1.2.3`;
+   `express@` → throws `UsageError("empty version")`; `a@b@c` → name `a`,
+   version `b@c` (version validation then fails).
 
 ## Acceptance Criteria
 
@@ -56,8 +64,8 @@ table-testable in isolation.
       boundary (valid) and 215 (invalid), uppercase, leading `.`/`_`/`-`,
       `..`, `%2e`, empty scope, missing name after scope, double `/`,
       whitespace, emoji.
-- [ ] Spec-body tests: the five examples in Detailed Requirement 4 plus
-      `a@b@c` (name `a`, version `b@c` → version validation fails).
+- [ ] Spec-body tests: the six required cases in Detailed Requirement 4.
+- [ ] `encodeNpmNameForUrl` throws on an invalid name (never encodes it).
 - [ ] Version tests: `1.2.3` ok; `v1.2.3` ok (cleaned to `1.2.3`); `^1.2.3`,
       `1.2`, `1.2.x`, `latest` rejected; prerelease `1.2.3-rc.1` ok and
       flagged by `isPrerelease`.
@@ -65,7 +73,7 @@ table-testable in isolation.
 
 ## Validation
 
-- `npm test -- npm/name npm/versions`; 100 % branch coverage on `name.ts`
+- `npm run lint && npm run typecheck && npm test -- npm/name npm/versions`; 100 % branch coverage on `name.ts`
   (it is a security boundary).
 
 ## Dependencies

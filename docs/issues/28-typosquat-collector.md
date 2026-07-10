@@ -39,7 +39,8 @@ test vectors come from the ecosyste-ms typosquatting dataset
    separator-stripping) is also compared, and the flag fires if EITHER
    representation matches the criteria (catches `python-dateutil` vs
    `python_dateutil` style squats and `requests` vs `requsts` style typos).
-3. Decision (DESIGN §9.3):
+3. Decision (DESIGN §9.3; value shape per DESIGN §9.2 is
+   `{ suspect, isPopular, nearest?, distance? }`):
    - if subject name ∈ top list (either representation, exact) ⇒
      `{ suspect: false, isPopular: true }` — popular packages are exempt;
    - else compute min distance over the list:
@@ -52,12 +53,15 @@ test vectors come from the ecosyste-ms typosquatting dataset
 4. Performance: full scan of 5,000 names with early-exit must stay < 50 ms
    (perf smoke test with generous bound; no index structure needed in v1).
 5. Evidence: suspect ⇒
-   `"Name is within edit distance <d> of popular package '<nearest>'."`
-   with the top-list source attribution URL; non-suspect popular ⇒
-   `"Name is itself among the top <count> <ecosystem> packages."`.
-6. The collector consumes `ctx.topPackages` (issue 27 loader); a missing /
-   failed-to-load index ⇒ `unavailable(dataset-missing)` (should never
-   happen in a shipped build — also assert via packaging test).
+   `"Name is within edit distance <d> of popular package '<nearest>'."`;
+   non-suspect popular ⇒
+   `"Name is itself among the top <count> packages."`. In both cases
+   `evidence.url` = `ctx.topPackages.source.url` (attribution provided by
+   the issue-27 index shape).
+6. The collector consumes `ctx.topPackages`, which is guaranteed valid:
+   loading happens once in the check-command wiring (issue 39) and a
+   corrupt shipped data file fails fast there with `InternalError`
+   (issue 27). This collector has no dataset-missing path.
 
 ## Acceptance Criteria
 
@@ -75,7 +79,7 @@ test vectors come from the ecosyste-ms typosquatting dataset
 
 ## Validation
 
-- `npm test -- typosquat similarity`.
+- `npm run lint && npm run typecheck && npm test -- typosquat similarity`.
 
 ## Dependencies
 

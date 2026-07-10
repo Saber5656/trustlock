@@ -26,20 +26,33 @@ semantics.
 
 1. Interface constants: `id: "npm"`, `displayName: "npm"`,
    `depsDevSystem: "NPM"`, `osvEcosystem: "npm"`.
-2. Delegations: `validateName` → 08; `parseSpecBody` → 08;
-   `compareVersions` → 08; `detectProject`/`readDirectDependencies` → 10.
+2. Delegations: `validateName` → 08; `validateExactVersion` → 08
+   (`parseExactVersion`); `parseSpecBody` → 08; `compareVersions` → 08;
+   `detectProject`/`readDirectDependencies` → 10. Adapter constants:
+   `notApplicableSignals: ["metadata.yanked", "execution.sdist-only"]`
+   (DESIGN §9.2 footnote) and
+   `lockfileGuidance: "run npm install (npm >= 7) to generate a v2+ package-lock.json"`.
+   **Boundary rule (S3)**: `resolveVersion` and `fetchPackageFacts` first
+   run `validateName`/`validateExactVersion` on their inputs and throw
+   before any registry-client call on failure (tests assert zero client
+   calls for `../evil`, `UPPER`, `^1.2.3`).
 3. `resolveVersion(name, requested, ctx)`:
    - fetch packument;
    - `requested` given: must exist as key in `versions` (else
      `RegistryError` "version <v> not found for <name>; latest is <latest>");
      `resolvedFrom: "requested"`.
    - `requested` undefined: use `dist-tags.latest`; if that tag is missing
-     (pathological) ⇒ highest non-prerelease semver in `versions`;
+     (pathological) ⇒ highest non-prerelease semver in `versions`; if no
+     non-prerelease version exists either ⇒
+     `RegistryError("no stable version found for <name>; specify an exact version")`;
      `resolvedFrom: "latest"`.
    - `registryPageUrl: https://www.npmjs.com/package/<name>` (scoped names
      unencoded in the human URL) + `/v/<version>`.
-4. `fetchPackageFacts(name, version, ctx)` — mapping table (packument `P`,
-   version manifest `V = P.versions[version]`, packument URL `U`):
+4. `fetchPackageFacts(name, version, ctx)` — `P.versions[version]` absent
+   ⇒ `RegistryError("version <v> not found for <name>; latest is <latest>")`
+   (same message family as resolveVersion). Mapping table (packument `P`,
+   version manifest `V = P.versions[version]`; each fact's `sourceUrl` =
+   the `sourceUrl` returned by the client call that produced it):
 
    | PackageFacts field | Source | Rule |
    |---|---|---|
@@ -69,7 +82,11 @@ semantics.
 
 - [ ] `resolveVersion` covered: requested-exists, requested-missing (error
       message includes latest), latest-tag, latest-tag-missing fallback,
-      prerelease exclusion.
+      no-stable-version error, prerelease exclusion.
+- [ ] S3 boundary tests: invalid name and non-exact version each rejected
+      with zero registry-client calls (spies).
+- [ ] `fetchPackageFacts` with a version absent from the packument ⇒
+      `RegistryError`.
 - [ ] Facts mapping golden test per fixture package (express, left-pad,
       scoped, install-scripts) — full `PackageFacts` object snapshot.
 - [ ] `latestPublisher.priorPublishCount` computed correctly on a fixture
@@ -80,7 +97,7 @@ semantics.
 
 ## Validation
 
-- `npm test -- npm/adapter`.
+- `npm run lint && npm run typecheck && npm test -- npm/adapter architecture`.
 
 ## Dependencies
 

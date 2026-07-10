@@ -32,7 +32,10 @@ require byte-level discipline.
                 registryUrl: string };
      verdict: Verdict;
      incomplete: boolean;
-     findings: Finding[];              // ordering from engine (issue 30)
+     findings: Finding[];              // engine order (issue 30): triggered
+                                       // (severity desc, ruleId), then
+                                       // not-evaluable, then pass — buildReport
+                                       // asserts (dev-mode) rather than re-sorts
      signals: Signal[];                // ordering from orchestrator (19)
      policy: { failOn: "critical" | "warn";
                overrides: Record<string, { severity?: Severity; enabled?: boolean }> };
@@ -46,6 +49,12 @@ require byte-level discipline.
    construct objects in declared order and rely on insertion order — choose
    the explicit-order approach with a unit test pinning the first N bytes),
    2-space indent, LF, trailing newline. Output goes to stdout verbatim.
+   **Sanitization stance (DESIGN §16.6, normative)**: JSON output is NOT
+   run through `sanitize()` — machine consumers need faithful values, and
+   `JSON.stringify` escapes control bytes (ESC becomes \u001b, etc.) so the emitted
+   byte stream cannot carry raw terminal escapes. A test feeds
+   ANSI/C0-laden strings through a report and asserts the output bytes
+   contain no raw `\x1b`/`\x9b`/C0 (only their `\uXXXX` escaped forms).
 3. `digest.ts`:
    - `canonicalReportDigest(report): string` returning `sha256-<hex>`;
    - canonicalization: deep-clone report, delete `generatedAt`,
@@ -59,7 +68,12 @@ require byte-level discipline.
    snapshot update; removals/renames fail review by policy (note in test
    header comment).
 5. zod schema `reportSchema` exported for consumers (approve --report uses
-   it in issue 36 to validate user-supplied files — untrusted input).
+   it in issue 36 to validate user-supplied files — untrusted input, S6):
+   top-level and nested objects `.strict()` except `Signal.value` (typed
+   `z.unknown()` but re-serialized only through the key-sorting canonical
+   path); records parsed into null-prototype maps;
+   `__proto__`/`constructor`/`prototype` keys anywhere ⇒ parse failure
+   (hostile-report fixtures required).
 
 ## Acceptance Criteria
 
@@ -74,7 +88,7 @@ require byte-level discipline.
 
 ## Validation
 
-- `npm test -- report/model report/digest report/json`.
+- `npm run lint && npm run typecheck && npm test -- report/model report/digest report/json`.
 
 ## Dependencies
 

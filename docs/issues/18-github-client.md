@@ -34,23 +34,25 @@ the run (ADR-006 #2). The token is the only secret vetlock ever touches
      extraction; anything else ⇒ null. Non-GitHub hosts ⇒ null (U7).
    - `projectId(owner, repo)` = `github.com/{owner}/{repo}` lowercased —
      shared with the deps.dev client (issue 16 switches to this helper).
-2. `createGitHubClient(infra, token?: string)`:
-   - `getRepo(owner, repo): Promise<GitHubRepo | "not-found" | "rate-limited">`
+2. `createGitHubClient(http: CachedHttp)` — **no token parameter**: auth is
+   owned entirely by the underlying `HttpClient` (issue 04, constructed
+   with the token by the CLI wiring in issue 39 and attaching it to
+   `api.github.com` only). This module neither sees nor logs the token
+   (S5).
+   - `getRepo(owner, repo): Promise<GitHubRepo | "not-found" | "rate-limited" | "invalid-response">`
      via `GET https://api.github.com/repos/{owner}/{repo}` with headers
      `Accept: application/vnd.github+json`, `X-GitHub-Api-Version:
-     2022-11-28`; token (when present) via the http client's
-     GitHub-host-only auth (issue 04).
-   - consumed fields: `full_name`, `archived`, `pushed_at`,
-     `stargazers_count`, `open_issues_count`, `default_branch`,
-     `license?.spdx_id`.
+     2022-11-28`.
+   - zod schema (passthrough) for consumed fields: `full_name`, `archived`,
+     `pushed_at`, `stargazers_count`, `open_issues_count`,
+     `default_branch`, `license?.spdx_id` — a 200 whose shape fails the
+     schema ⇒ `"invalid-response"` (collectors map it to
+     `unavailable(source-error)`).
    - 404 ⇒ `"not-found"`; 403/429 with `x-ratelimit-remaining: 0` or
      rate-limit message ⇒ `"rate-limited"` (log info suggesting
      `VETLOCK_GITHUB_TOKEN`); other 403 ⇒ `"rate-limited"` as well
-     (conservative), other errors propagate `NetworkError`.
+     (conservative); other network errors propagate `NetworkError`.
    - TTL `CACHE_TTLS.github`.
-3. Token sourcing happens in the CLI wiring (issue 39):
-   `VETLOCK_GITHUB_TOKEN ?? GITHUB_TOKEN`; this module only accepts an
-   optional string. It never logs it (S5 test).
 
 ## Acceptance Criteria
 
@@ -61,15 +63,17 @@ the run (ADR-006 #2). The token is the only secret vetlock ever touches
       `github.com`), 150-char owner ⇒ null.
 - [ ] getRepo happy path (real recorded `expressjs/express`, trimmed),
       404 path, rate-limit path (`403` + `x-ratelimit-remaining: 0`
-      fixture) each mapped to the documented variant.
-- [ ] Auth header present iff token given (positive/negative captured).
+      fixture), and malformed-200 path each mapped to the documented
+      variant.
 - [ ] Cache-key test: token value does NOT change the cache key and never
-      appears in the cache dir contents (S5).
-- [ ] Issue-16 duplicate helper removed; both clients import the shared one.
+      appears in the cache dir contents (S5; exercised via a CachedHttp
+      whose underlying HttpClient carries a token).
+- [ ] `parseGitHubRepo`/`projectId` are exported from this module only
+      (repo-wide grep test: no duplicate implementation).
 
 ## Validation
 
-- `npm test -- github`.
+- `npm run lint && npm run typecheck && npm test -- github`.
 
 ## Dependencies
 

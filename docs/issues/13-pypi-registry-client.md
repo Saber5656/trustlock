@@ -22,8 +22,14 @@ research/data-sources.md §2.2. pypistats is community-run and best-effort
 
 ## Detailed Requirements
 
-1. All requests use PEP 503-normalized names (caller passes normalized —
-   assert with a dev-mode check).
+1. All requests use PEP 503-normalized names — every public method
+   re-validates via `validatePypiName` (S3) and throws `InternalError` on
+   un-normalized or invalid input before building any URL/cache key (tests:
+   zero `CachedHttp` calls for `Django` (un-normalized) and `../evil`).
+   **Return convention**: like issue 09, every method resolves to
+   `{ data, sourceUrl }`. **S6 hardening**: `releases` and `project_urls`
+   records are copied into null-prototype objects after zod validation
+   (prototype-pollution fixtures required).
 2. `fetchProject(name): Promise<PypiProject>`
    - `GET https://pypi.org/pypi/{name}/json`
    - zod (passthrough) for consumed fields: `info` (`name`, `version`
@@ -34,10 +40,12 @@ research/data-sources.md §2.2. pypistats is community-run and best-effort
      with `upload_time_iso_8601`, `packagetype` (`sdist`|`bdist_wheel`),
      `filename`, `digests.sha256`, `yanked`).
    - 404 ⇒ `RegistryError("package not found: <name>")`.
-3. `fetchVersion(name, version): Promise<PypiVersionInfo>`
+3. `fetchVersion(name, version): Promise<{ data: PypiVersionInfo; sourceUrl: string }>`
    - `GET https://pypi.org/pypi/{name}/{version}/json`; same info schema
      scoped to that version (`info.yanked` refers to the release); `urls`
      array = that version's files.
+   - 404 ⇒ `RegistryError("version not found: <name>@<version>")` (issue 15
+     relies on this exact semantic).
 4. `fetchProvenance(name, version, filename): Promise<{ present: boolean; publisherIdentity?: string; kinds: string[] }>`
    - `GET https://pypi.org/integrity/{name}/{version}/{filename}/provenance`
      with `allow404`.
@@ -49,9 +57,12 @@ research/data-sources.md §2.2. pypistats is community-run and best-effort
    - 404 ⇒ `{ present: false, kinds: [] }`.
    - Helper `pickProvenanceFile(files)`: prefer the first wheel, else the
      sdist — one file's provenance decides the signal in v1 (documented).
-5. `fetchDownloads(name): Promise<{ lastMonth: number } | null>`
+5. `fetchDownloads(name): Promise<{ data: { lastMonth: number } | null; sourceUrl: string }>`
    - `GET https://pypistats.org/api/packages/{name}/recent`
-   - any error/404/shape mismatch ⇒ `null` (+ debug log) — never throws (U2).
+   - zod shape: `{ data: { last_month: number } }` (pypistats nests under
+     a `data` key) → map `data.last_month` to `lastMonth`.
+   - any error/404/shape mismatch ⇒ `data: null` (+ debug log) — never
+     throws (U2).
 6. Fixtures: `requests` (popular, wheel+sdist), `flask` or similar with
    Trusted-Publishing provenance (200 integrity fixture), one yanked-release
    fixture (may be synthetic but shape-accurate), one sdist-only package.
@@ -61,8 +72,13 @@ research/data-sources.md §2.2. pypistats is community-run and best-effort
 
 - [ ] Project/version happy paths parse all fixtures; `project_urls: null`,
       `requires_dist: null`, empty `releases` entries tolerated.
-- [ ] 404 project ⇒ `RegistryError`; provenance 200/404 both mapped;
-      publisherIdentity extracted from the Trusted-Publishing fixture.
+- [ ] 404 project ⇒ `RegistryError("package not found…")`; 404 version ⇒
+      `RegistryError("version not found…")`; provenance 200/404 both
+      mapped; publisherIdentity extracted from the Trusted-Publishing
+      fixture.
+- [ ] S3: un-normalized/invalid names throw before any request (spy).
+- [ ] S6: prototype-pollution keys in `releases`/`project_urls` fixtures
+      cause no prototype mutation.
 - [ ] pypistats failure modes (404, 5xx after retries, bad JSON) all ⇒
       `null`, never a throw (three tests).
 - [ ] All request URLs captured in tests use normalized names.
@@ -71,11 +87,11 @@ research/data-sources.md §2.2. pypistats is community-run and best-effort
 
 ## Validation
 
-- `npm test -- pypi/registry`.
+- `npm run lint && npm run typecheck && npm test -- pypi/registry`.
 
 ## Dependencies
 
-- 04, 05, 12.
+- 04, 05, 12 (name validation). (ISSUE_PLAN table lists the same.)
 
 ## Non-goals
 

@@ -36,24 +36,31 @@ child-process call in the codebase (S1 wrapper).
       `resolved <name> latest → <version>` to stderr (visible decision);
    3. version-existence check is inherent in resolveVersion (`RegistryError`
       exit 2 when missing);
-   4. npm only: fetch facts-lite for integrity — call
-      `fetchPackageFacts` and take `distribution.integrity` (absent ⇒ omit
-      field, log debug); PyPI: no integrity in v1;
+   4. npm only: fetch facts for integrity — call `fetchPackageFacts` and
+      take `facts.distribution?.value.integrity` (`distribution` is a
+      `Fact<…>` — DESIGN §7.3; absent ⇒ omit field, log debug); PyPI: no
+      integrity in v1;
    5. `--report <path>`: read file (≤ 5 MiB), `reportSchema.parse` (issue
-      32), require subject match (ecosystem+name+version equal after
-      normalization; mismatch ⇒ `UsageError` naming both subjects), store
-      `canonicalReportDigest` of it;
+      32), require subject match — `subject.ecosystem` and normalized
+      `subject.name` equal, and `subject.resolvedVersion` equals the
+      version being approved (mismatch ⇒ `UsageError` naming both
+      subjects); set `entry.reportDigest = canonicalReportDigest(report)`;
    6. reviewer: `--by` value, else git identity as `Name <email>` (name
       only if email missing), else `UsageError` with hint
       (`--by "Your Name <you@example.com>"` or set git config);
    7. `reviewedAt`: current time ISO 8601 UTC (the CLI layer is the only
       clock reader; injected `now()` for tests);
-   8. ledger: `findLedger` (§12.4); for approve/reject a missing ledger ⇒
-      `createEmptyLedger` at `<cwd>/vetlock.json` + notice on stderr;
-      corrupt ledger ⇒ exit 2 (never overwrite — S7);
+   8. ledger: `findLedger(cwd, --ledger)` (§12.4). Missing-target rules:
+      explicit `--ledger <path>` given and file missing ⇒ create the
+      empty ledger AT THAT PATH (+ notice); no flag and discovery finds
+      nothing ⇒ create at `<cwd>/vetlock.json` (+ notice); corrupt ledger
+      ⇒ exit 2 (never overwrite — S7);
    9. `upsertDecision`; when replacing, print previous decision line
-      (`replacing: approved 4.17.20 by Alice on 2026-06-01`);
-   10. `saveLedger`; print one-line confirmation to stdout:
+      (`replacing: approved 4.17.20 by Alice on 2026-06-01`) — all
+      ledger-originating strings in this and other messages pass through
+      `sanitize()` (issue 33) before terminal output (§16.6);
+   10. `saveLedger` (comparators from the adapter registry); print
+       one-line confirmation to stdout:
        `approved npm:left-pad@1.3.0 (by Yasushi Takagi <ty@…>)`.
        With `--format json`: emit
        `{ "decision", "ecosystem", "name", "version", "reviewedBy", "reviewedAt", "replaced"? }`.
@@ -80,17 +87,21 @@ child-process call in the codebase (S1 wrapper).
 - [ ] Reviewer resolution precedence (`--by` > git > error) — git helper
       faked; the real `git.ts` has its own tests (missing git binary path
       included).
-- [ ] Missing-ledger creation notice; corrupt-ledger exit 2.
+- [ ] Missing-ledger creation: explicit `--ledger` path honored; discovery
+      miss creates at cwd; corrupt-ledger exit 2.
 - [ ] PyPI approve stores normalized name (`Django` input → `django`
       entry).
+- [ ] Hostile `reviewedBy`/`reason` in a replaced entry renders sanitized
+      in the replacement notice.
 
 ## Validation
 
-- `npm test -- cmd-approve git`.
+- `npm run lint && npm run typecheck && npm test -- cmd-approve git`.
 
 ## Dependencies
 
-- 35, 06, 11, 15, 32 (report schema), 03.
+- 35, 06, 11, 15, 32 (report schema + digest), 33 (sanitize), 03.
+  (ISSUE_PLAN table lists the same.)
 
 ## Non-goals
 

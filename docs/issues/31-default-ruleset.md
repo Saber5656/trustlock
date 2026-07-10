@@ -86,7 +86,7 @@ ledger policy overrides).
 
 ## Validation
 
-- `npm test -- rules/default`; paste the generated rule/severity table in
+- `npm run lint && npm run typecheck && npm test -- rules/default`; paste the generated rule/severity table in
   the PR description for human review.
 
 ## Dependencies

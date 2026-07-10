@@ -31,19 +31,20 @@ issue-05 `postJson` cache path.
      — exactly `version`, never purl+version together (400 otherwise).
    - response: `results[0].vulns[]?.id` list (may be absent ⇒ empty).
    - split ids: `maliciousIds` = ids starting `MAL-`; `vulnIds` = rest.
-   - hydrate: `GET /v1/vulns/{id}` for the first 10 of `vulnIds` ∪ first 10
-     of `maliciousIds` (cap total 20); consumed fields: `id`, `summary?`,
-     `severity[]? ({type, score})`, `database_specific?.severity?`,
-     `aliases[]?`.
-   - severity mapping to `"low"|"medium"|"high"|"critical"|"unknown"`:
-     prefer `database_specific.severity` (string, lowercased) else parse
-     CVSS v3/v4 score from `severity[]` (`type` `CVSS_V3`/`CVSS_V4`, score
-     string like `CVSS:3.1/...` — extract base score via the vector's
-     numeric evaluation is NOT required: use `database_specific.severity`
-     or, absent that, `"unknown"`; do not implement CVSS math in v1 —
-     document).
-   - result: `{ vulns: [{id, summary?, severity, url}], malicious: [{id, summary?, url}], truncated: boolean }`
-     where `url = https://osv.dev/vulnerability/{id}`.
+   - hydrate: `GET /v1/vulns/{id}` with a **single total cap of 10**
+     (DESIGN §14.3), allocated malicious-first: all `maliciousIds` up to
+     10, remaining budget to `vulnIds` in response order; consumed fields:
+     `id`, `summary?`, `database_specific?.severity?`, `aliases[]?`.
+   - severity mapping to `"low"|"medium"|"high"|"critical"|"unknown"` —
+     ONE rule for v1: lowercase `database_specific.severity` when it is one
+     of the four recognized strings; anything else (absent, other strings,
+     CVSS vectors in `severity[]`) ⇒ `"unknown"`. No CVSS math in v1.
+   - result: `{ vulns: [{id, summary?, severity, url}], truncatedVulns: boolean,
+     malicious: [{id, summary?, url}], truncatedMalicious: boolean }`
+     where `url = https://osv.dev/vulnerability/{id}` and each `truncated*`
+     flag is true when that list had ids beyond its hydration allocation
+     (un-hydrated ids still appear as `{id, url, severity: "unknown"}`
+     entries — nothing is dropped, only detail).
 3. Unqueried ecosystems guard: `osvEcosystem` must be non-empty (adapters
    provide it); name passed as-is for npm, normalized for PyPI (OSV uses
    normalized PyPI names — matches adapter normalization; test it).
@@ -57,8 +58,14 @@ issue-05 `postJson` cache path.
       trimmed), a `MAL-` fixture (real MAL id for any npm malware package,
       e.g. from OSV search; content trimmed), empty-result fixture.
 - [ ] `MAL-` ids land in `malicious`, others in `vulns`.
-- [ ] Cap: fixture with 15 vuln ids hydrates exactly 10 and sets
-      `truncated: true`.
+- [ ] Cap: fixture with 15 vuln ids + 0 MAL hydrates exactly 10, all 15
+      present in `vulns`, `truncatedVulns: true`; fixture with 3 MAL + 12
+      vulns hydrates 3 MAL + 7 vulns (`truncatedVulns: true`,
+      `truncatedMalicious: false`).
+- [ ] Malformed querybatch 200 and malformed hydration 200 (zod failure) ⇒
+      treated as source failure per S6: querybatch-level ⇒ throw
+      `NetworkError("invalid response from api.osv.dev")`; per-id
+      hydration-level ⇒ that entry degrades to `severity: "unknown"`.
 - [ ] Individual hydration 500 ⇒ entry degraded, batch succeeds.
 - [ ] querybatch request body matches the documented shape byte-for-byte
       (snapshot of captured body).
@@ -67,7 +74,7 @@ issue-05 `postJson` cache path.
 
 ## Validation
 
-- `npm test -- osv`.
+- `npm run lint && npm run typecheck && npm test -- osv`.
 
 ## Dependencies
 
@@ -75,9 +82,11 @@ issue-05 `postJson` cache path.
 
 ## Non-goals
 
-- No CVSS vector math; no range queries (exact version only); no paging
-  (`next_page_token` — with 1 query it is irrelevant; assert absent or
-  ignore).
+- No CVSS vector math; no range queries (exact version only). Pagination:
+  a single query CAN return `next_page_token` when a package has very many
+  vulns — v1 does NOT follow pages; when the token is present, set the
+  affected list's `truncated*` flag to true (test with a paginated
+  fixture).
 
 ## Design References
 

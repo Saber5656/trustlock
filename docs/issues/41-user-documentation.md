@@ -24,16 +24,25 @@ thresholds (Scorecard lesson, research §4) and honest scope statements.
 
 1. `README.md` (replace entirely; English):
    - one-paragraph pitch (the §1.2 loop) + badges placeholder (CI);
-   - install/quick start: `npx vetlock check express`,
-     `vetlock approve express@5.1.0 --reason "…"`, `npx vetlock verify`
-     with real expected output snippets (from golden fixtures, trimmed);
+   - install/quick start — commands must be verbatim-executable: use
+     `npx vetlock …` consistently for all three commands
+     (`npx vetlock check express`,
+     `npx vetlock approve express@5.1.0 --reason "…"`,
+     `npx vetlock verify`), plus an optional
+     `npm install -g vetlock` note for bare `vetlock` usage; include real
+     expected output snippets (from golden fixtures, trimmed);
    - "How it decides" section: link to docs/signals.md, state
      determinism/no-LLM/no-telemetry, the `unavailable`/`incomplete`
-     honesty rule, and what vetlock does NOT do (link SECURITY.md scope);
+     honesty rule, and what vetlock does NOT do (issue 42 adds the
+     SECURITY.md link into this section when SECURITY.md lands — leave a
+     stable heading for it, do not link a nonexistent file);
    - CI recipe (plain step: `npx vetlock verify`);
    - supported ecosystems/manifests table (incl. the workspaces and
      requirements.txt limitations, with v2 pointers);
-   - GITHUB_TOKEN note (optional, what improves with it);
+   - GITHUB_TOKEN note: `VETLOCK_GITHUB_TOKEN` preferred over
+     `GITHUB_TOKEN`; optional; what improves with it; and the S5 facts
+     users may rely on — env-only, sent to api.github.com only, never
+     cached, never logged, never in reports (DESIGN §16.4);
    - license badge/footer (MIT).
 2. `docs/usage.md`:
    - the three personas' workflows (§2) with full command transcripts;
@@ -53,9 +62,11 @@ thresholds (Scorecard lesson, research §4) and honest scope statements.
      exact THRESHOLD constant value, default severity, rationale (2–3
      sentences), and policy-override id;
    - a "changing the defaults" section referencing policy syntax.
-   - A consistency test (`test/docs.test.ts`): parse docs/signals.md and
-     assert every `SIGNAL_CATALOG` id and every `DEFAULT_RULES` id appears
-     exactly once (docs cannot drift silently).
+   - Canonical anchors: each signal section heading is exactly
+     `### Signal: <id>` and each rule section `### Rule: <id>` — the
+     consistency test (`test/docs.test.ts`) asserts every `SIGNAL_CATALOG`
+     id and every `DEFAULT_RULES` id appears as such a heading exactly
+     once (cross-references elsewhere in prose are unrestricted).
 4. Style: en-US, sentence-case headings, no marketing superlatives; every
    factual claim about behavior must be true of the implementation at merge
    time (reviewer checks against golden outputs).
@@ -73,12 +84,13 @@ thresholds (Scorecard lesson, research §4) and honest scope statements.
 
 ## Validation
 
-- `npm test -- docs`; markdown link check (simple script or `rg`-based
+- `npm run lint && npm run typecheck && npm test -- docs`; markdown link check (simple script or `rg`-based
   relative-path assertion in the docs test).
 
 ## Dependencies
 
-- 39, 37 (documented behavior final); 31 (thresholds).
+- 39, 37 (documented behavior final; threshold values arrive transitively
+  through 39→31). (ISSUE_PLAN table: 39, 37.)
 
 ## Non-goals
 

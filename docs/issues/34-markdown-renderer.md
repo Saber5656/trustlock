@@ -29,10 +29,14 @@ threat (S4 applies — sanitize first, then Markdown-escape).
    4. one table per category **with at least one non-pass finding**:
       `| | Rule | Finding | Evidence |` rows: outcome glyph (❌ critical,
       ⚠️ warn, ▫️ notice/info, ❔ not-evaluable), rule id (inline code),
-      sanitized+escaped detail, evidence as `[link](url)`;
+      Finding cell = sanitized+escaped `<title>: <detail>`, Evidence cell
+      = first evidence as `[link](url)`;
    5. passed checks collapsed:
-      `<details><summary>NN passed checks</summary>` + a simple list
-      `</details>`;
+      `<details><summary>NN passed checks</summary>` containing one list
+      item per passed rule in ruleId order —
+      `` - `R-XXX-NNN` <title>: <detail> ([evidence](url)) `` — then
+      `</details>` (same content depth as the terminal renderer, DESIGN
+      §11.3);
    6. footer line with counts (same numbers as terminal footer).
 2. Escaping pipeline for every dynamic string:
    `sanitize()` (issue 33) → `escapeMarkdown()`: escape `|`, backtick,
@@ -58,7 +62,7 @@ threat (S4 applies — sanitize first, then Markdown-escape).
 
 ## Validation
 
-- `npm test -- render-markdown`.
+- `npm run lint && npm run typecheck && npm test -- render-markdown`.
 
 ## Dependencies
 

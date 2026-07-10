@@ -31,7 +31,9 @@ stars/scorecard; both can be independently unavailable.
      `unavailable(no-repository-declared)`.
    - non-GitHub URL ⇒ both `unavailable(unsupported-host)` (U7) with the
      host named in the reason.
-3. `repository.status` (GitHub repos only):
+3. `repository.status` (GitHub repos only; value shape per DESIGN §9.2:
+   `{ exists, archived?, lastPushAt?, lastPushAgeDays?, stars?,
+   openIssues?, forks? }`):
    - primary: `github.getRepo(owner, repo)`:
      - repo data ⇒ `{ exists: true, archived, lastPushAt, lastPushAgeDays,
        stars, openIssues }` — `lastPushAgeDays` computed against an injected
@@ -39,25 +41,35 @@ stars/scorecard; both can be independently unavailable.
        stay pure);
      - `"not-found"` ⇒ `{ exists: false }` (evaluated — this is the
        R-REPO-002 trigger);
+     - `"invalid-response"` ⇒ `unavailable(source-error)`;
      - `"rate-limited"` ⇒ fallback: `depsdev.getProject(projectId)`; project
        data ⇒ `{ exists: true, stars, forks }` with `archived`/`lastPushAt`
        omitted (partial data is still `evaluated`; evidence notes the
-       fallback); `"not-indexed"`/`"invalid-response"` ⇒
+       fallback); fallback `"not-indexed"` ⇒
        `unavailable(github-rate-limited)` with hint to set
-       `VETLOCK_GITHUB_TOKEN`.
+       `VETLOCK_GITHUB_TOKEN`; fallback `"invalid-response"` ⇒
+       `unavailable(source-error)`;
+     - thrown `NetworkError`/`OfflineMissError` from either client ⇒
+       `unavailable(<error class name>)` — caught HERE per signal (partial
+       results stay possible: status may evaluate while scorecard is
+       unavailable, and vice versa).
 4. `repository.scorecard`: `depsdev.getProject(projectId)` ⇒
    `{ score, date }` when scorecard present; `"not-indexed"` ⇒
-   `unavailable(not-indexed)`; project exists but no scorecard field ⇒
-   `unavailable(no-scorecard)`.
+   `unavailable(not-indexed)`; `"invalid-response"` ⇒
+   `unavailable(source-error)`; project exists but no scorecard field ⇒
+   `unavailable(no-scorecard)`; thrown network errors as in 3.
 5. Only ONE `getProject` call per run (share the promise between 3 & 4).
-6. Evidence URLs: `https://github.com/{owner}/{repo}` for status;
-   `https://deps.dev/project/github/{owner}%2F{repo}` for scorecard.
+6. Evidence URLs: `https://github.com/{owner}/{repo}` for status; for
+   scorecard, build from the shared `projectId(owner, repo)` helper
+   (issue 18): `https://deps.dev/project/<urlencoded projectId>`.
 
 ## Acceptance Criteria
 
-- [ ] Matrix tests: {declared null, non-GitHub, GitHub} ×
-      {getRepo ok/not-found/rate-limited} × {getProject ok/not-indexed}
-      produce exactly the documented statuses/values (table-driven).
+- [ ] Split tests: (a) declared-null and non-GitHub inputs ⇒ immediate
+      unavailable with ZERO client calls (spies); (b) GitHub inputs only:
+      matrix {getRepo ok/not-found/rate-limited/invalid-response/throws} ×
+      {getProject ok/not-indexed/invalid-response/throws} produces exactly
+      the documented statuses/values (table-driven).
 - [ ] Rate-limited + deps.dev-ok yields evaluated status with partial
       fields and fallback evidence sentence.
 - [ ] `getProject` called at most once per collect (spy assertion).
@@ -68,7 +80,7 @@ stars/scorecard; both can be independently unavailable.
 
 ## Validation
 
-- `npm test -- collectors/repository`.
+- `npm run lint && npm run typecheck && npm test -- collectors/repository`.
 
 ## Dependencies
 

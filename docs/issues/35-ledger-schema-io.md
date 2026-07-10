@@ -23,8 +23,9 @@ schema is a compatibility surface from v1 onward.
 
 1. `schema.ts` (zod):
    ```ts
+   import { ecosystemIdSchema } from "../ecosystems/types.js"; // single source (issue 07)
    ledgerEntrySchema = z.object({
-     ecosystem: z.enum(["npm", "pypi"]),
+     ecosystem: ecosystemIdSchema,      // never restate ecosystem literals here (P6)
      name: z.string().min(1),
      version: z.string().min(1),
      decision: z.enum(["approved", "rejected"]),
@@ -40,10 +41,12 @@ schema is a compatibility surface from v1 onward.
      approvals: z.array(ledgerEntrySchema),
    }).passthrough();
    ```
-   Exported TS types inferred from zod. Entry names must additionally pass
-   the ecosystem adapter's `validateName` at load (defense against a
-   crafted ledger in a cloned repo — S3; invalid entries ⇒ `ProjectError`
-   naming the index and field).
+   Exported TS types inferred from zod. Entry `name`/`version` fields
+   additionally pass a conservative structural check defined here (S3,
+   without pulling adapter modules in): length ≤ 250, no control chars, no
+   whitespace, no `..`, at most one `/` (and only in `@scope/name` form),
+   charset `[A-Za-z0-9@/._~-]` — full ecosystem grammar is enforced at use
+   sites. Violations ⇒ `ProjectError` naming the entry index and field.
 2. `io.ts`:
    - `findLedger(startDir, explicitPath?): string | null` — explicit path
      returned as-is (existence not required for approve); otherwise walk up
@@ -55,13 +58,22 @@ schema is a compatibility surface from v1 onward.
      decide whether that is fatal; unparsable JSON / schema failure ⇒
      `ProjectError` with path + hint ("fix or restore via git; vetlock
      never overwrites a corrupt ledger").
-   - `saveLedger(path, ledger)` — sort `approvals` by (ecosystem, name,
-     adapter `compareVersions`); serialize with fixed key order
-     (version, policy?, approvals; entry keys in schema order), 2-space
-     indent, LF, trailing newline; write `<path>.tmp` in the same dir,
-     `fsync`, `rename` over target; preserve unknown top-level and entry
-     keys byte-losslessly (zod passthrough objects re-serialized —
-     unknown-key ORDER may normalize; document).
+     **S6 hardening**: read cap 5 MiB (`ProjectError` beyond); parsed
+     objects are copied into null-prototype containers;
+     `__proto__`/`constructor`/`prototype` keys at any level ⇒
+     `ProjectError` (hostile-ledger fixtures required: oversized,
+     malformed JSON, prototype-pollution keys).
+   - `saveLedger(path, ledger, comparators: Record<EcosystemId, (a: string, b: string) => number>)`
+     — sort `approvals` by (ecosystem, name, `comparators[ecosystem]`)
+     with lexicographic fallback for an ecosystem missing from the map;
+     commands build the map from the adapter registry
+     (`adapter.compareVersions`). Serialize with fixed key order (version,
+     policy?, approvals; entry keys in schema order), 2-space indent, LF,
+     trailing newline; write `targetPath + ".tmp"` in the same dir
+     (DESIGN §12.1), `fsync`, `rename` over target. Unknown top-level and
+     entry keys are preserved **semantically** (values identical after a
+     load→save round-trip; key ordering of unknown keys may normalize to
+     sorted — JSON re-serialization cannot promise byte-level identity).
    - `createEmptyLedger(): LedgerFile` = `{ version: 1, approvals: [] }`.
 3. `ops.ts`:
    - `upsertDecision(ledger, entry): { ledger: LedgerFile; replaced?: LedgerEntry }`
@@ -84,6 +96,8 @@ schema is a compatibility surface from v1 onward.
       file intact; tmp file cleaned on success.
 - [ ] Corrupt file (bad JSON, wrong version, invalid entry name `../evil`)
       ⇒ `ProjectError` with the documented hints; file untouched.
+- [ ] Hostile ledger fixtures: >5 MiB file, `__proto__`-keyed entry ⇒
+      `ProjectError`, no prototype mutation (explicit assertion).
 - [ ] `findLedger`: found-in-parent, stops-at-git-boundary (fixture repo
       with `.git` dir between cwd and a decoy ledger above it), none-found.
 - [ ] upsert insert/replace paths; replace returns previous entry.
@@ -91,11 +105,13 @@ schema is a compatibility surface from v1 onward.
 
 ## Validation
 
-- `npm test -- ledger`.
+- `npm run lint && npm run typecheck && npm test -- ledger`.
 
 ## Dependencies
 
-- 01, 03, 30 (policy schema), 08/12 (compareVersions injection).
+- 01, 03, 07 (`ecosystemIdSchema`, `EcosystemId`), 30 (policy schema).
+  Version comparators arrive by injection — no dependency on 08/12.
+  (ISSUE_PLAN table: 01, 03, 07, 30.)
 
 ## Non-goals
 

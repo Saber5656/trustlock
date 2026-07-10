@@ -35,7 +35,10 @@ should eventually show its provenance signal green.
    - `publishConfig: { "provenance": true, "access": "public" }`;
    - verify `files`, `engines`, `bin` from issue 01 still exact.
 2. `.github/workflows/release.yml`:
-   - `workflow_dispatch` with `version` input (semver, validated);
+   - `workflow_dispatch` with `version` input — the workflow FAILS unless
+     `inputs.version` is valid semver AND equals `package.json.version`
+     AND, when the ref is a tag, the tag is exactly `v${inputs.version}`
+     (prevents publishing a mismatched ref);
    - `permissions: { contents: read, id-token: write }` (id-token for
      provenance);
    - jobs: full test suite → build → `npm pack` + file-list audit (reuse
@@ -57,22 +60,31 @@ should eventually show its provenance signal green.
    never unpublish beyond the 72h window policy).
 4. `CHANGELOG.md`: Keep-a-Changelog header + `## [Unreleased]` section;
    releasing moves entries under the version (documented in RELEASING.md).
-5. Add a packaging test (`test/packaging.test.ts`): run
-   `npm pack --dry-run --json` programmatically; assert file list, bin
-   mapping, and that `data/top-packages/*.json` are included and
-   `test/`/`docs/`/fixtures are not.
+5. Packaging verification — split to respect the S1 lint scope: an npm
+   script `verify:pack` runs
+   `npm pack --dry-run --json > pack-report.json` (shell level) followed
+   by `tsx scripts/verify-pack.ts pack-report.json`; the script (in
+   `scripts/`, where dev-only code lives) parses the JSON and fails unless
+   the file list is exactly dist/**, data/**, README.md, LICENSE,
+   package.json, the bin mapping is `vetlock → dist/cli/index.js`, and
+   package.json has **no `preinstall`/`install`/`postinstall` scripts**
+   (S8). CI (issue 02's package-audit job) switches to `npm run
+   verify:pack`.
 
 ## Acceptance Criteria
 
-- [ ] `npm pack --dry-run` file list exactly: dist/**, data/**, README.md,
-      LICENSE, package.json (test-enforced).
+- [ ] `npm run verify:pack` enforces the exact file list, bin mapping, and
+      the no-install-scripts rule (green locally + in CI).
 - [ ] Release workflow lints (actionlint or careful review), defaults to
       dry-run, and its non-dry path publishes with `--provenance` under the
       `release` environment.
 - [ ] RELEASING.md covers dispatch AND local-publish paths, npm 2FA, and
       environment-protection setup (owner-manual steps flagged as such).
 - [ ] No secrets referenced outside the single publish step.
-- [ ] CHANGELOG scaffold present; packaging test green in CI.
+- [ ] Release workflow rejects a `version` input that differs from
+      package.json.version (asserted via a dry-run dispatch with a wrong
+      version, linked in the PR).
+- [ ] CHANGELOG scaffold present; `verify:pack` green in CI.
 
 ## Validation
 
@@ -81,7 +93,8 @@ should eventually show its provenance signal green.
 
 ## Dependencies
 
-- 40 (suite must be green to make the workflow meaningful), 02, 01.
+- 40 (suite must be green to make the workflow meaningful), 02.
+  (ISSUE_PLAN table: 40, 02.)
 
 ## Non-goals
 

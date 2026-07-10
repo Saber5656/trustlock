@@ -146,7 +146,8 @@ verification · `vetlock init` interactive setup · dependents-count signal.
   Notable exclusions: no `chalk` (use `util.styleText`), no `axios`/`got`
   (use global `fetch`), no `fs-extra`.
 - Dev dependencies: `typescript`, `vitest`, `eslint` (flat config) +
-  `typescript-eslint`, `prettier`, `tsx`.
+  `typescript-eslint`, `prettier`, `tsx`, and `npm-high-impact` (data source
+  for the generated top-packages list only — never imported by `src/`).
 
 ### 4.2 Module layout
 
@@ -257,7 +258,7 @@ Binary name: `vetlock` (npm package `vetlock`, `"bin": {"vetlock": "dist/cli/ind
 | `--json` | — | off | machine-readable output on stdout (shorthand for `--format json`) |
 | `--format <fmt>` | — | `terminal` | `terminal` \| `json` \| `markdown` (check only; verify/list support `terminal`/`json`) |
 | `--ledger <path>` | — | `./vetlock.json` (nearest ancestor: see §12.4) | ledger file location |
-| `--offline` | `VETLOCK_OFFLINE=1` | off | serve all HTTP from cache; missing cache ⇒ signal `unavailable` |
+| `--offline` | `VETLOCK_OFFLINE=1` (exactly the string `1`) | off | serve all HTTP from cache; missing cache ⇒ signal `unavailable` |
 | `--cache-dir <path>` | `VETLOCK_CACHE_DIR` | OS default (§14.2) | cache location |
 | `--no-color` | `NO_COLOR` (any value) | auto (TTY detect) | disable ANSI styling |
 | `--verbose` | — | off | debug logging to stderr |
@@ -273,9 +274,11 @@ only; never a flag, never persisted, never logged (§16.4).
   `critical`).
 - `approve` / `reject`: `--ecosystem`, `--reason <text>`,
   `--by <identity>` (default: `user.name <user.email>` from git config;
-  error with guidance if unavailable and `--by` missing).
-- `verify`: `--ecosystem` (restrict), `--prod-only` (npm: ignore
-  devDependencies).
+  error with guidance if unavailable and `--by` missing),
+  `--report <path>` (a `check --json` output for the same subject; its
+  canonical digest is stored in the ledger entry — §12.3).
+- `verify`: `--ecosystem` (restrict), `--prod-only` (keep only
+  `group: "prod"` dependencies, uniformly for every ecosystem).
 - `list`: `--decision <approved|rejected>`, `--ecosystem`.
 
 ### 5.4 Exit codes (uniform across commands)
@@ -283,7 +286,7 @@ only; never a flag, never persisted, never logged (§16.4).
 | Code | Meaning |
 |---|---|
 | `0` | success — check verdict `pass`/`warn` (without `--fail-on warn`); verify with zero violations |
-| `1` | policy outcome — check verdict `fail` (or `warn` with `--fail-on warn`); verify with ≥1 violation |
+| `1` | policy outcome — check verdict `fail` (`--fail-on warn` escalates a would-be `warn` verdict to `fail` *inside* the engine, so exit codes always map 1:1 from the verdict); verify with ≥1 violation |
 | `2` | execution error — invalid input, network totally unavailable (and not `--offline`-satisfiable), unreadable/corrupt files, internal error |
 
 Stdout carries the report/payload only; all diagnostics go to stderr. `--json`
@@ -319,9 +322,12 @@ Examples: `express`, `express@5.1.0`, `npm:@types/node@24.0.1`,
 Names are untrusted (CLI args **and** manifest contents). Validation happens
 before any URL interpolation or cache-key derivation.
 
-- npm: max 214 chars; lowercase; must not start with `.` or `_`; allowed
-  `[a-z0-9-._~]` plus scoped form `@scope/name` (scope and name each
-  validated); no URL-meaningful characters otherwise. Scoped names are
+- npm: max 214 chars; lowercase; each part (scope, name) must start with
+  `[a-z0-9]` — i.e. names starting with `.`, `_`, or `-` are rejected
+  (deliberate v1 strictness: slightly narrower than npm's legacy grammar;
+  packages with such names cannot be checked in v1 and this is documented) —
+  remaining chars `[a-z0-9-._~]`; scoped form `@scope/name` with both parts
+  validated; no URL-meaningful characters otherwise. Scoped names are
   URL-encoded (`@scope%2Fname`) exactly once at the HTTP layer.
 - PyPI: `^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$`; normalized per PEP 503
   (lowercase; runs of `-_.` → `-`) before any lookup or ledger write.
@@ -347,8 +353,15 @@ interface EcosystemAdapter {
   readonly osvEcosystem: string;         // "npm" | "PyPI"
 
   validateName(raw: string): { ok: true; normalized: string } | { ok: false; reason: string };
+  validateExactVersion(raw: string): { ok: true; version: string } | { ok: false; reason: string };
   parseSpecBody(body: string): { name: string; version?: string };   // §6.1 body rules
   compareVersions(a: string, b: string): -1 | 0 | 1;                 // ecosystem ordering
+  readonly notApplicableSignals: readonly string[]; // catalog ids that are structurally
+                                                    // impossible for this ecosystem; the
+                                                    // orchestrator pre-marks them "skipped"
+  readonly lockfileGuidance: string;                // one-line remediation shown by verify
+                                                    // for lock_missing (e.g. "run npm install
+                                                    // (npm >= 7) to generate a v2+ lockfile")
   resolveVersion(name: string, requested: string | undefined, ctx: InfraContext):
     Promise<ResolvedVersion>;            // requested==null ⇒ latest stable
   fetchPackageFacts(name: string, version: string, ctx: InfraContext):
@@ -358,9 +371,14 @@ interface EcosystemAdapter {
 }
 ```
 
-Adapters own: name rules, version ordering, registry-of-record access, and
-manifest reading. Cross-registry enrichment (deps.dev, OSV, GitHub, download
-stats) lives in collectors, keyed by `depsDevSystem` / `osvEcosystem`.
+Adapters own: name rules, version ordering, registry-of-record access,
+manifest reading, and the declaration of which catalog signals do not apply
+to their ecosystem. Cross-registry enrichment (deps.dev, OSV, GitHub,
+download stats) lives in collectors, keyed by `depsDevSystem` /
+`osvEcosystem` carried in the signal context — collectors themselves stay
+ecosystem-agnostic. `types.ts` also exports `ecosystemIdSchema` (the zod
+enum of registered ids) so other schemas (e.g. the ledger) never restate
+ecosystem literals.
 
 Adding an ecosystem = one new directory under `core/ecosystems/` + one
 registration line + a top-packages data file. Nothing else changes; this is
@@ -438,8 +456,9 @@ interface DirectDependency {
 
 ### 8.2 Python reader
 
-- Direct deps: `pyproject.toml` `[project.dependencies]` (`prod`) +
-  `[project.optional-dependencies].*` (`optional`). Each PEP 508 string is
+- Direct deps: `pyproject.toml` — the `dependencies` array key inside the
+  `[project]` table (`prod`) + the arrays under
+  `[project.optional-dependencies]` (`optional`). Each PEP 508 string is
   reduced to a package name via a minimal, well-tested extractor (name = the
   leading token before any of `[`, `(`, `<`, `>`, `=`, `!`, `~`, `;`, space),
   then PEP 503-normalized. Extras and environment markers are ignored for
@@ -481,12 +500,37 @@ interface Collector {
 }
 ```
 
-`SignalContext` = `{ subject, facts: PackageFacts, infra: InfraContext,
-topPackages: TopPackagesIndex }`. Orchestrator rules:
+`SignalContext` (normative):
 
+```ts
+interface SignalContext {
+  subject: {
+    ecosystem: EcosystemId; name: string; version: string;
+    osvEcosystem: string; depsDevSystem: string;   // adapter-provided ids
+    registryPageUrl: string;                        // human registry page
+  };
+  facts: PackageFacts;
+  infra: {                     // structural types declared in signals/types.ts;
+    depsdev: DepsDevLike;      // concrete clients (issues 16-18) satisfy them,
+    osv: OsvLike;              // so the framework has no client dependencies
+    github: GitHubLike;
+    downloads: DownloadsFacade;   // { fetch(): Promise<{period, count, evidenceUrl} | null> }
+    offline: boolean; log: Logger;
+  };
+  topPackages: TopPackagesIndex;   // issue 27 shape incl. source attribution
+  abortSignal: AbortSignal;        // cooperative cancellation on timeout
+}
+```
+
+Orchestrator rules:
+
+- signals in every adapter's `notApplicableSignals` are pre-marked
+  `skipped(not-applicable)` and their collectors are not asked for them —
+  collectors never contain ecosystem conditionals;
 - collectors run in parallel, concurrency 4, per-collector timeout 10 s;
 - a collector throwing/timeout ⇒ its declared signals become `unavailable`
-  with the error class as reason (never crashes the run — P4);
+  with a deterministic reason (`"timeout"`, the `VetlockError` class name,
+  or `"unknown-error"` for non-Error throws) — never crashes the run (P4);
 - output signals sorted by id (deterministic reports);
 - every declared signal id must appear exactly once in the output
   (orchestrator fills gaps with `unavailable`).
@@ -504,22 +548,27 @@ topPackages: TopPackagesIndex }`. Orchestrator rules:
 | `maintainers.count` | ✅ | ⚠ unavailable | registry | `{ count, names }` |
 | `maintainers.publisher-change` | ✅ | ⚠ unavailable | registry | `{ latestPublisher, priorPublishCount }` |
 | `repository.declared` | ✅ | ✅ | registry | `{ url \| null }` |
-| `repository.status` | ✅ | ✅ | GitHub API (token-optional) / deps.dev fallback | `{ exists, archived?, lastPushAt?, lastPushAgeDays?, stars? }` |
+| `repository.status` | ✅ | ✅ | GitHub API (token-optional) / deps.dev fallback | `{ exists, archived?, lastPushAt?, lastPushAgeDays?, stars?, openIssues?, forks? }` |
 | `repository.scorecard` | ✅ | ✅ | deps.dev | `{ score, date }` (OpenSSF Scorecard) |
 | `provenance.attestation` | ✅ | ✅ | registry attestation endpoints | `{ present, kinds, publisherIdentity? }` |
 | `execution.install-scripts` | ✅ | — | registry | `{ present, names }` |
 | `execution.sdist-only` | — | ✅ | registry | `{ sdistOnly, hasWheel }` |
 | `execution.bin-entries` | ✅ | — | registry | `{ bins }` |
-| `vulnerabilities.known` | ✅ | ✅ | OSV | `{ count, ids, maxSeverity }` (non-`MAL-`) |
-| `vulnerabilities.malicious` | ✅ | ✅ | OSV | `{ count, ids }` (`MAL-` advisories) |
+| `vulnerabilities.known` | ✅ | ✅ | OSV | `{ count, ids, maxSeverity, advisories, truncated }` (non-`MAL-`) |
+| `vulnerabilities.malicious` | ✅ | ✅ | OSV | `{ count, ids, advisories, truncated }` (`MAL-` advisories) |
 | `popularity.downloads` | ✅ | ✅ | api.npmjs.org / pypistats | `{ period, count }` |
-| `name.typosquat` | ✅ | ✅ | bundled top-packages data | `{ suspect, nearest?, distance? }` |
+| `name.typosquat` | ✅ | ✅ | bundled top-packages data | `{ suspect, isPopular, nearest?, distance? }` |
 | `license.declared` | ✅ | ✅ | registry | `{ license \| null, spdxValid }` |
 | `footprint.dependencies` | ✅ | ✅ | deps.dev | `{ directCount, transitiveCount }` |
 | `footprint.install-size` | ✅ | — | registry | `{ unpackedSize, fileCount }` |
 
-⚠ = structurally unavailable for that ecosystem: emitted as `skipped` with
-reason `not-applicable`, so reports stay ecosystem-honest.
+⚠ = structurally not applicable for that ecosystem: the adapter lists the
+signal in `notApplicableSignals` and the orchestrator emits it as `skipped`
+with reason `not-applicable`, so reports stay ecosystem-honest.
+(npm: `metadata.yanked`, `execution.sdist-only`. PyPI: `metadata.deprecated`,
+`maintainers.count`, `maintainers.publisher-change`,
+`execution.install-scripts`, `execution.bin-entries`,
+`footprint.install-size`.)
 
 ### 9.3 Typosquat check (deterministic, offline)
 
@@ -637,7 +686,9 @@ Policy lives in the ledger file (§12) under `policy`:
   },
   "verdict": "warn",
   "incomplete": false,
-  "findings": [ /* Finding[], §10.1, sorted: severity desc, ruleId asc */ ],
+  "findings": [ /* Finding[], §10.1 engine order: triggered (severity desc,
+                   ruleId asc), then not-evaluable (ruleId asc), then pass
+                   (ruleId asc) — one ordering everywhere */ ],
   "signals":  [ /* Signal[], §9.1, sorted by id */ ],
   "policy": { "failOn": "critical", "overrides": { /* effective */ } },
   "durationMs": 3120
@@ -700,8 +751,9 @@ descriptions (and the v2 GitHub Action).
 - Ordering: `approvals` sorted by (`ecosystem`, `name`,
   `compareVersions`) — deterministic, diff-friendly.
 - Serialization: 2-space indent, LF, trailing newline, UTF-8.
-- Writes are atomic: write `vetlock.json.tmp` in the same directory, fsync,
-  rename over the original.
+- Writes are atomic: write `<ledger filename>.tmp` alongside the target
+  file (i.e. `targetPath + ".tmp"`, also for explicit `--ledger` paths),
+  fsync, rename over the original.
 - One entry per (ecosystem, name, version): a new `approve`/`reject` for the
   same triple **replaces** the entry and prints the previous decision.
 
@@ -793,7 +845,8 @@ manifest are listed as `stale` (informational, never a violation).
 - Location: `--cache-dir` → `VETLOCK_CACHE_DIR` → platform default
   (macOS `~/Library/Caches/vetlock`, Linux `$XDG_CACHE_HOME/vetlock` or
   `~/.cache/vetlock`, Windows `%LOCALAPPDATA%\vetlock\Cache`), created `0700`.
-- Entry = JSON file named sha256(method + url); value stores
+- Entry = JSON file at `<cacheDir>/v1/<sha256(method + " " + url)>.json`
+  (the `v1/` segment allows future format migration); value stores
   `{ url, fetchedAt, etag?, status, body }`.
 - TTLs: registry metadata 1 h; downloads/pypistats 24 h; deps.dev 24 h; OSV
   1 h; GitHub 1 h. Fresh ⇒ serve; stale ⇒ revalidate with `If-None-Match`
@@ -820,7 +873,8 @@ Typed hierarchy in `infra/errors.ts`:
 VetlockError (abstract: message, exitCode, hint?)
 ├─ UsageError            (2)  bad spec/flags/name validation
 ├─ ProjectError          (2)  missing/corrupt manifest, lockfile, ledger
-├─ NetworkError          (2 only when fatal to the command's purpose)
+├─ NetworkError          (2 only when fatal to the command's purpose;
+│   │                     carries url and optional HTTP status)
 │   ├─ NetworkPolicyError, ResponseTooLargeError, OfflineMissError
 ├─ RegistryError         (2)  package/version not found (check/approve)
 └─ InternalError         (2)  bugs — message asks to file an issue
@@ -869,7 +923,11 @@ than standard `HTTPS_PROXY` env honored by undici — documented behavior.
 vetlock spawns **no child processes** except `git config --get user.name/email`
 (argv-array spawn, no shell) for `reviewedBy` defaulting. It never runs npm,
 pip, uv, or any package content. An ESLint rule bans `child_process` imports
-outside the one wrapper module; CI enforces it.
+(static import, dynamic `import()`, `require`, and `createRequire` paths)
+across `src/**` with `src/infra/git.ts` as the sole exception; CI enforces
+it. Dev-only code outside `src/` (the e2e harness spawning the built CLI,
+`scripts/smoke-live.ts`) may use `execFile` with argv arrays and no shell —
+never inside the shipped `src/`/`dist/` tree.
 
 ### 16.4 Secrets
 
@@ -889,8 +947,12 @@ intent), but discovery (§12.4) never crosses a `.git` boundary upward.
 `sanitize()` (single shared implementation): strip C0 controls except
 `\n`/`\t` (which become spaces in single-line contexts), strip C1, strip
 `ESC`-initiated sequences, cap rendered string length (1,000 chars, `…`).
-Applied by renderers to every string originating from registries, manifests,
-or the ledger. Unit tests include ANSI-injection fixtures.
+Applied by the **human-facing renderers** (terminal, markdown) to every
+string originating from registries, manifests, or the ledger. The JSON
+renderers deliberately do NOT sanitize values: JSON string escaping already
+neutralizes control bytes in the output stream, and machine consumers need
+faithful data — but they must sanitize before displaying to humans (stated
+in the docs). Unit tests include ANSI-injection fixtures.
 
 ### 16.7 vetlock's own supply chain
 

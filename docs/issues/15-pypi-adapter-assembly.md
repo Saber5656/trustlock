@@ -24,7 +24,17 @@ updated) rather than worked around.
 
 1. Constants: `id: "pypi"`, `displayName: "PyPI"`, `depsDevSystem: "PYPI"`,
    `osvEcosystem: "PyPI"`.
-2. Delegations to 12 (name/spec/versions) and 14 (project/manifest).
+2. Delegations to 12 (`validateName`, `validateExactVersion` via
+   `parseExactPypiVersion`, `parseSpecBody` via `parsePypiSpecBody`,
+   `compareVersions`) and 14 (project/manifest). Adapter constants:
+   `notApplicableSignals: ["metadata.deprecated", "maintainers.count",
+   "maintainers.publisher-change", "execution.install-scripts",
+   "execution.bin-entries", "footprint.install-size"]` (DESIGN §9.2
+   footnote) and `lockfileGuidance: "run uv lock to generate uv.lock"`.
+   **Boundary rule (S3)**: `resolveVersion` and `fetchPackageFacts` first
+   run `validateName`/`validateExactVersion` and throw before any
+   registry-client call on failure (tests assert zero client calls for
+   `..`, `Django` un-normalized passthrough is normalized, `==1.*`).
 3. `resolveVersion(name, requested, ctx)`:
    - requested: must exist as a key of `releases` with ≥1 file; a release
      whose files are all yanked resolves but the yanked flag will surface
@@ -37,7 +47,12 @@ updated) rather than worked around.
      accordingly.
    - `registryPageUrl: https://pypi.org/project/<name>/<version>/`.
 4. `fetchPackageFacts(name, version, ctx)` mapping (project `P`, version
-   info `V`, files `F` = that version's files):
+   info `V`, files `F` = that version's files). Source attribution rule:
+   every fact carries `sourceUrl` — project-wide facts
+   (firstPublishedAt, latestVersion, releaseDates) cite the project JSON
+   URL, version-scoped facts cite the version JSON URL, and
+   `attestations` cites the Integrity API URL (all taken from the
+   clients' `{ data, sourceUrl }` results):
 
    | PackageFacts field | Source | Rule |
    |---|---|---|
@@ -78,11 +93,12 @@ updated) rather than worked around.
 
 ## Validation
 
-- `npm test -- pypi/adapter adapter-contract`.
+- `npm run lint && npm run typecheck && npm test -- pypi/adapter adapter-contract`.
 
 ## Dependencies
 
-- 07, 12, 13, 14 (and 11 for the shared contract suite location).
+- 07, 12, 13, 14, 11 (shared adapter-contract suite location).
+  (ISSUE_PLAN table lists the same five.)
 
 ## Non-goals
 

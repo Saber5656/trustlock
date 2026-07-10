@@ -34,43 +34,56 @@ identically for npm and PyPI via the normalized facts.
    before it (0 or 1 release ⇒ gap null, other fields computed; empty ⇒
    unavailable) and `latestReleaseAgeDays` = days from the latest release
    date to `now` (consumed by rule R-CAD-001, which reads only this signal).
-5. `metadata.latest-drift`: from `facts.latestVersion` + subject version ⇒
-   `{ latestVersion, isLatest, behindCount }`; `behindCount` = number of
-   release dates strictly after the subject version's date (date-based, so
-   it works cross-ecosystem without version math); if the subject IS latest
-   ⇒ `{ isLatest: true, behindCount: 0 }`.
-6. `metadata.deprecated`: npm — from `facts.deprecated`
-   (`{ deprecated, message? }`, message sanitizer-bound at render);
-   PyPI — `skipped(not-applicable)`.
-7. `metadata.yanked`: PyPI — from `facts.yanked`; npm —
-   `skipped(not-applicable)`.
-8. Evidence: each evaluated signal cites the registry page URL
-   (`registryPageUrl` passed via ctx subject? — **normative**: evidence URL =
-   the fact's `sourceUrl`) and a sentence with the concrete values, e.g.
+5. `metadata.latest-drift`: requires BOTH `facts.latestVersion` and
+   `facts.releaseDates` ⇒ `{ latestVersion, isLatest, behindCount }`;
+   `behindCount` = number of release dates strictly after the subject
+   version's date (date-based, so it works cross-ecosystem without version
+   math); subject IS latest ⇒ `{ isLatest: true, behindCount: 0 }`.
+   Unavailable cases: `latestVersion` or `releaseDates` fact missing ⇒
+   `unavailable(no-registry-data)`; subject version absent from
+   `releaseDates` ⇒ `unavailable(subject-version-not-in-release-history)`.
+6. `metadata.deprecated`: from `facts.deprecated` — value mapping
+   `facts.deprecated.value.flag → value.deprecated`,
+   `facts.deprecated.value.message → value.message` (message
+   sanitizer-bound at render). For PyPI this signal is pre-marked
+   `skipped` by the orchestrator (adapter `notApplicableSignals`, issue
+   19) — the collector contains NO ecosystem logic and simply never
+   receives the id there.
+7. `metadata.yanked`: from `facts.yanked` — mapping
+   `facts.yanked.value.flag → value.yanked`,
+   `facts.yanked.value.reason → value.reason`. Pre-marked `skipped` for
+   npm by the orchestrator, same mechanism.
+8. Evidence: normative — each signal's `evidence.url` is the `sourceUrl` of
+   the fact(s) it consumed (cadence and drift use
+   `releaseDates.sourceUrl`); the summary is a sentence with the concrete
+   values, e.g.
    `"Latest release is 5.1.0 (published 2026-05-02); requested 4.18.2 has 14 newer releases."`.
 
 ## Acceptance Criteria
 
-- [ ] Six signals emitted for an npm facts fixture; `metadata.yanked`
-      skipped for npm, `metadata.deprecated` skipped for PyPI (and vice
-      versa evaluated).
+- [ ] Six signals emitted for an npm facts fixture (yanked/deprecated
+      skip behavior is owned and tested by the orchestrator — this
+      collector's tests only cover the evaluated/unavailable paths of the
+      signals it is routed).
 - [ ] Age math: fixed `now` fixture asserts exact `ageDays` values,
       including same-day (0) and leap-ish boundaries (floor semantics).
 - [ ] Cadence: fixtures for 0/1/many releases; releasesLast12mo counts only
       releases within 365 days of `now`.
 - [ ] Drift: subject==latest, subject older by N, subject newer than
       latest-tag (possible with dist-tags; ⇒ isLatest false, behindCount 0 —
-      lock this edge in a test).
+      lock this edge in a test), subject missing from release history ⇒
+      the documented unavailable reason.
 - [ ] Missing facts produce `unavailable`, never throws; validateSignalOutput
       helper passes.
 
 ## Validation
 
-- `npm test -- collectors/metadata`.
+- `npm run lint && npm run typecheck && npm test -- collectors/metadata`.
 
 ## Dependencies
 
-- 19; facts fixtures from 11/15.
+- 19, 11 (npm facts fixtures); PyPI-shaped cases additionally use 15
+  fixtures. (ISSUE_PLAN table: 19, 11, 15.)
 
 ## Non-goals
 

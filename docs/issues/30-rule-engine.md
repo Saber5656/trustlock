@@ -33,12 +33,21 @@ default ruleset lands separately (issue 31).
    const DEFAULT_POLICY: Policy = { failOn: "critical", rules: {} };
    interface Evaluation { findings: Finding[]; verdict: Verdict; incomplete: boolean }
    ```
-2. `resolvePolicy(ledgerPolicy?: Partial<Policy>, cliFailOn?: "critical"|"warn"): Policy`
-   - precedence: CLI flag > ledger file > default;
-   - unknown rule ids in ledger policy ⇒ keep them (forward-compat) but
-     emit one `warn` log listing them;
+2. `resolvePolicy(ledgerPolicy: Partial<Policy> | undefined,
+   cliFailOn: "critical" | "warn" | undefined,
+   knownRuleIds: ReadonlySet<string>):
+   { policy: Policy; unknownRuleIds: string[] }`
+   - pure: precedence CLI flag > ledger file > default;
+   - `unknownRuleIds` = policy rule ids ∉ `knownRuleIds`, kept in the
+     returned policy (forward-compat) — the CALLER logs one warn listing
+     them (the engine module does no logging);
    - invalid severity strings ⇒ `ProjectError` (the ledger is
      user-maintained; fail loud, not silent).
+   - Policy zod schema (shared with issue 35): `.strict()` on the policy
+     object and per-rule override objects; the `rules` record is parsed
+     into a null-prototype map, and `__proto__`/`constructor`/`prototype`
+     keys are rejected with `ProjectError` (hostile-ledger tests
+     required — S6).
 3. `evaluate(rules, signals, policy): Evaluation`:
    - signals indexed by id; for each **enabled** rule (policy
      `enabled: false` ⇒ rule excluded from findings entirely):
@@ -48,10 +57,11 @@ default ruleset lands separately (issue 31).
        clutter reports — distinct from `not-evaluable`);
    - finding severity = policy override ?? rule.defaultSeverity;
    - `verdict`: any triggered finding with severity `critical` ⇒ `fail`;
-     else any triggered `warn` ⇒ `warn`; else `pass`; then `failOn: "warn"`
-     escalates a `warn` verdict to `fail` (implemented as: exit-relevant
-     verdict computed by caller? — **No**, normative: `failOn` changes the
-     VERDICT itself; report shows the effective policy);
+     else any triggered `warn` ⇒ `warn`; else `pass`. Then, normatively,
+     `failOn: "warn"` escalates a `warn` verdict to `fail` INSIDE the
+     engine — the verdict itself changes (never a separate exit-code
+     computation in callers), and the report shows the effective policy
+     (DESIGN §5.4, §10.1);
    - `incomplete` = ≥1 `not-evaluable` finding;
    - findings sorted: triggered first (severity desc, then ruleId),
      then not-evaluable (ruleId), then pass (ruleId);
@@ -60,9 +70,9 @@ default ruleset lands separately (issue 31).
      allowed and documented).
    - a rule whose `signalId` matches no signal in the input ⇒
      `InternalError` (catalog and ruleset must agree; catches wiring bugs).
-4. Engine performs no I/O, no clock reads, no logging except via an
-   injected logger for the unknown-rule-id warn (pass log through
-   `resolvePolicy` caller instead — keep `evaluate` 100 % pure).
+4. The whole module performs no I/O, no clock reads, and no logging —
+   `resolvePolicy` reports unknown ids in its return value and `evaluate`
+   is 100 % pure.
 
 ## Acceptance Criteria
 
@@ -74,13 +84,16 @@ default ruleset lands separately (issue 31).
       not-evaluable + `incomplete: true`.
 - [ ] Ordering test over a mixed evaluation snapshot.
 - [ ] Policy precedence: default < ledger < CLI (three-layer test).
+- [ ] Unknown rule ids returned in `unknownRuleIds` and preserved in the
+      policy; hostile policy (`__proto__` key, extra fields, bad severity)
+      ⇒ `ProjectError` (strict schema), no prototype mutation.
 - [ ] Missing-signal wiring bug ⇒ `InternalError`.
 - [ ] Purity: same inputs twice ⇒ deep-equal outputs (and no Date/Math.random
       usage — lint-level grep in test).
 
 ## Validation
 
-- `npm test -- rules/engine`.
+- `npm run lint && npm run typecheck && npm test -- rules/engine`.
 
 ## Dependencies
 

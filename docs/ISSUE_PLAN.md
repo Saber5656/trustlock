@@ -71,56 +71,58 @@ drafts and are derived artifacts.
 
 ## 3. Dependency table
 
-`⇐` = "blocked by". Issues not listed as blockers of each other may proceed
-in parallel within their wave.
+`⇐` = "blocked by". This table is the authoritative union of every issue
+file's Dependencies section (kept in sync — a mismatch is a doc bug).
+Issues not listed as blockers of each other may proceed in parallel within
+their wave.
 
 | Issue | Blocked by |
 |---|---|
 | 01 | — |
 | 02 | 01 |
 | 03 | 01 |
-| 04 | 01 |
-| 05 | 01, 04 |
+| 04 | 01, 03 |
+| 05 | 01, 03, 04 |
 | 06 | 03, 07 |
-| 07 | 01 |
+| 07 | 01, 03, 05 |
 | 08 | 07 |
-| 09 | 04, 05 |
-| 10 | 07 |
+| 09 | 04, 05, 08 |
+| 10 | 03, 07, 08 |
 | 11 | 07, 08, 09, 10 |
 | 12 | 07 |
-| 13 | 04, 05 |
-| 14 | 07, 12 |
-| 15 | 07, 12, 13, 14 |
+| 13 | 04, 05, 12 |
+| 14 | 03, 07, 12 |
+| 15 | 07, 11, 12, 13, 14 |
 | 16 | 04, 05 |
 | 17 | 04, 05 |
 | 18 | 04, 05 |
-| 19 | 07, 03 |
-| 20 | 19, 11 (uses PackageFacts; PyPI cases also need 15) |
+| 19 | 03, 07 |
+| 20 | 19, 11, 15 |
 | 21 | 19, 11 |
 | 22 | 19, 16, 18 |
-| 23 | 19, 09, 13 |
+| 23 | 19, 11, 15 |
 | 24 | 19, 11, 15 |
 | 25 | 19, 17 |
-| 26 | 19, 09, 13 |
-| 27 | 01 |
+| 26 | 19 |
+| 27 | 01, 03 |
 | 28 | 19, 27 |
-| 29 | 19, 16, 11 |
-| 30 | 19 |
-| 31 | 30, 20–26, 28, 29 (signal shapes) |
+| 29 | 19, 16, 11, 15 |
+| 30 | 19, 03 |
+| 31 | 30, 20, 21, 22, 23, 24, 25, 26, 28, 29 (signal value shapes) |
 | 32 | 30, 19 |
 | 33 | 32 |
-| 34 | 32 |
-| 35 | 01, 30 (policy schema) |
-| 36 | 35, 06, 11, 15 |
-| 37 | 35, 10, 14 |
-| 38 | 35 |
-| 39 | 06, 11, 15, 19, 31, 32, 33, 34 |
-| 40 | 36, 37, 38, 39 |
+| 34 | 32, 33 |
+| 35 | 01, 03, 07, 30 |
+| 36 | 35, 06, 11, 15, 32, 33, 03 |
+| 37 | 35, 10, 14, 07, 33, 03 |
+| 38 | 35, 03, 33 |
+| 39 | 06, 11, 15, 19, 31, 32, 33, 34, 35 |
+| 40 | 36, 37, 38, 39, 05, 02 |
 | 41 | 39, 37 (documents final behavior) |
-| 42 | 40 (audits the finished surface) |
+| 42 | 40, 43, 44 (audits the finished surface incl. release/governance S8) |
 | 43 | 40, 02 |
-| 44 | 01 |
-| 45 | 39 |
+| 44 | 01, 02 |
+| 45 | 36, 37, 39, 43 |
 
 Mermaid overview (waves compressed):
 
@@ -151,7 +153,10 @@ graph LR
 | 7 | 40–45 | e2e, docs, security audit, release readiness | v1 completion statement (§1) holds |
 
 Waves 1, 2, 3 can run in parallel after wave 0; issue 27 can start any time
-after 01.
+after 03. Within wave 7 the dependency-implied order is: 40 first, then
+41/43/44 (parallelizable), then 45, and **42 last** — the S1–S8 audit gates
+v1 and requires the release workflow (43) and governance files (44) to
+exist.
 
 ## 5. Coverage table (DESIGN.md → issues)
 

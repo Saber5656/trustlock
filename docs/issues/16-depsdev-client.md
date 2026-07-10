@@ -25,12 +25,14 @@ unknown U5 — the client must distinguish "not indexed" from errors.
 
 1. `createDepsDevClient(infra)`; base `https://api.deps.dev/v3`; all GETs
    through CachedHttp with `CACHE_TTLS.depsdev`.
-2. `getVersion(system, name, version): Promise<DepsDevVersion | "not-indexed">`
+2. `getVersion(system, name, version): Promise<DepsDevVersion | "not-indexed" | "invalid-response">`
    - `GET /systems/{system}/packages/{encodeURIComponent(name)}/versions/{encodeURIComponent(version)}`
    - consumed fields: `publishedAt?`, `isDefault?`, `isDeprecated?`,
      `licenses[]`, `advisoryKeys[] ({id})`, `links[] ({label, url})`.
-   - 404 ⇒ `"not-indexed"` (U5), never an exception.
-3. `getProject(projectId): Promise<DepsDevProject | "not-indexed">`
+   - 404 ⇒ `"not-indexed"` (U5), never an exception; malformed 200 ⇒
+     `"invalid-response"` (requirement 6 applies to all three methods).
+3. `getProject(projectId): Promise<DepsDevProject | "not-indexed" | "invalid-response">`
+   - 404 ⇒ `"not-indexed"`; malformed 200 ⇒ `"invalid-response"`.
    - `GET /projects/{encodeURIComponent(projectId)}` where projectId is e.g.
      `github.com/expressjs/express` (encoded once, `/` → `%2F`).
    - consumed: `starsCount?`, `forksCount?`, `openIssuesCount?`, `license?`,
@@ -38,20 +40,20 @@ unknown U5 — the client must distinguish "not indexed" from errors.
      score field location must be taken from a recorded real response
      (`scorecard.overallScore` vs nested; record `express` live once and
      commit).
-4. `getDependencies(system, name, version): Promise<{ directCount: number; transitiveCount: number } | "not-indexed">`
+4. `getDependencies(system, name, version): Promise<{ directCount: number; transitiveCount: number } | "not-indexed" | "invalid-response">`
    - `GET .../versions/{version}:dependencies`; response `nodes[]` where
      `relation` ∈ {`SELF`, `DIRECT`, `INDIRECT`} — counts derived:
      directCount = #DIRECT, transitiveCount = #DIRECT + #INDIRECT.
-   - 404 ⇒ `"not-indexed"`.
-5. `projectIdFromRepoUrl(url): string | null` — reuse the parsing from issue
-   18 if it lands first (single shared helper in `infra/github.ts` is
-   preferred; if 18 not merged yet, implement here and consolidate in 18).
-   GitHub URLs only; others ⇒ null.
-6. All schemas passthrough + optional-tolerant; a shape mismatch on a 200 ⇒
-   treated as source failure: log debug, return `"not-indexed"`? — **No**:
-   distinguish: return `"invalid-response"` variant so collectors can mark
-   `unavailable(source-error)` instead of `unavailable(not-indexed)`.
-   Normative: union return `T | "not-indexed" | "invalid-response"`.
+   - 404 ⇒ `"not-indexed"`; malformed 200 ⇒ `"invalid-response"`.
+5. This client takes fully-formed `projectId` strings from callers and
+   performs NO repository-URL parsing — `parseGitHubRepo`/`projectId(...)`
+   are owned by issue 18 (`infra/github.ts`) and used by the repository
+   collector (issue 22).
+6. Normative return convention for all three methods:
+   `T | "not-indexed" (404) | "invalid-response" (200 with a shape that
+   fails the zod schema — log at debug)`. Network-level failures (5xx after
+   retries, timeouts, offline miss) still THROW (`NetworkError` family) —
+   collectors convert those per DESIGN §15.
 
 ## Acceptance Criteria
 
@@ -67,7 +69,7 @@ unknown U5 — the client must distinguish "not indexed" from errors.
 
 ## Validation
 
-- `npm test -- depsdev`.
+- `npm run lint && npm run typecheck && npm test -- depsdev`.
 
 ## Dependencies
 

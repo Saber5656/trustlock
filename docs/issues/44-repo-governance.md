@@ -30,8 +30,10 @@ independent of product code and can land any time after scaffolding.
 2. `codeql.yml`: `javascript-typescript` default setup as a workflow;
    triggers: PR to main + weekly schedule; `permissions: security-events:
    write, contents: read`; actions SHA-pinned (issue 02 conventions).
-3. `CONTRIBUTING.md`: dev setup (Node ≥ 22.12, `npm ci`), command cheatsheet
-   (lint/typecheck/test/test:e2e/build), fixture-recording guidance
+3. `CONTRIBUTING.md`: dev setup (Node ≥ 22.12, `npm ci`), command
+   cheatsheet listing exactly the npm scripts that exist in package.json
+   at implementation time (verified by reading it — e.g. `test:e2e`
+   appears only if issue 40 has landed), fixture-recording guidance
    (public data only, trim large maps), the stdlib-first rule
    (styleText/fetch — ADR-002), the runtime-dependency ADR requirement, the
    security invariants pointer (ADR-007: hostile-input rules for every
@@ -65,6 +67,7 @@ independent of product code and can land any time after scaffolding.
 ## Dependencies
 
 - 01 (repo layout, scripts); 02 (pinning conventions).
+  (ISSUE_PLAN table: 01, 02.)
 
 ## Non-goals
 

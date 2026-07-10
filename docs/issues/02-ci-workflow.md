@@ -29,10 +29,14 @@ issue relies on.
    - `strategy.matrix`: `os: [ubuntu-latest, macos-latest, windows-latest]`
      × `node: [22, 24]`; `fail-fast: false`.
    - Steps: checkout → setup-node (with `node-version: ${{ matrix.node }}`,
-     `cache: npm`) → `npm ci` → `npm run lint` → `npm run typecheck` →
-     `npm run build` → `npm run test`.
-   - Lint step may run on ubuntu only (use a matrix `include`/`if` guard or a
-     separate `lint` job — choose the separate-job form for clarity).
+     `cache: npm`) → `npm ci` → `npm run typecheck` → `npm run build` →
+     `npm run test`.
+   - Separate `lint` job (ubuntu, Node 22): `npm ci` → `npm run lint`.
+   - Coverage gate (DESIGN §17): the ubuntu/Node 22 matrix leg runs
+     `npm run test:coverage` instead of `npm run test`; the ≥ 90 %-lines
+     threshold for `src/core/**` is configured in `vitest.config.ts` as
+     part of this issue (an empty/near-empty `core/` at this stage passes
+     trivially; the gate bites as code lands).
 4. Job `package-audit` (ubuntu, Node 22): `npm ci` → `npm run build` →
    `npm pack --dry-run --json > pack.json` → a script step that fails if the
    file list contains anything outside `dist/`, `data/`, `README.md`,

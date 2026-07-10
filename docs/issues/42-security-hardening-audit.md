@@ -42,19 +42,24 @@ release readiness.
 
    For each row the implementer runs the named tests and links the code.
    Any ❌ ⇒ fix within this issue if ≤ ~20 lines (test or patch), else file
-   a new issue and mark the row with it (v1 does not ship with open ❌ on
-   S1–S6; S7/S8 rows may reference issue 43 for release-workflow bits).
-3. Adversarial spot-checks to perform and record (commands + results in
-   the audit doc):
-   - `rg "child_process" src/ --glob '!src/infra/git.ts'` → empty;
-   - `rg "process\.env" src/core src/infra --glob '!src/cli/**'` → only the
-     documented sites (issue 39 centralized env reads — verify);
-   - run the CLI with `VETLOCK_GITHUB_TOKEN=hunter2` + `--verbose` against
-     seeded cache and `rg hunter2` over all outputs and the cache dir →
-     empty;
-   - hostile-manifest fixtures (issues 10/14) rerun via the e2e suite;
-   - `npm pack --dry-run` file list matches the allowlist (issue 02 job
-     logic re-verified locally).
+   a new issue and mark the row with it. **v1 completion requires ALL
+   S1–S8 rows ✅** (ISSUE_PLAN §1) — this issue therefore runs AFTER
+   issues 43 and 44 land, so the release-workflow and governance halves of
+   S8 are auditable, not merely referenced.
+3. Adversarial spot-checks — all FIVE below performed and recorded
+   (commands + results in the audit doc):
+   1. `rg "child_process" src/ --glob '!src/infra/git.ts'` → empty;
+   2. `rg "process\.env" src/core src/infra` → only the documented sites
+      (issue 39 centralized env reads — verify);
+   3. token-leak probe: with `VETLOCK_GITHUB_TOKEN=hunter2` and a FRESH
+      temp cache, run a check whose fixtures include a cached-then-live
+      GitHub request path (integration harness with injected fetch so an
+      authenticated request actually fires), then `rg hunter2` over
+      stdout, stderr, the JSON report, and every file in the cache dir →
+      empty;
+   4. hostile-manifest fixtures (issues 10/14) rerun via the e2e suite;
+   5. `npm pack --dry-run` file list matches the allowlist (issue 02 job
+      logic re-verified locally).
 4. Dependency review: `npm ls --omit=dev --all` output committed to the
    audit doc; confirm exactly the four ADR-002 runtime deps (+ their
    transitive closure listed for the record).
@@ -64,8 +69,9 @@ release readiness.
 - [ ] SECURITY.md present, linked from README, factually consistent with
       the implementation (reviewer cross-checks the allowlist and scope
       statements).
-- [ ] Audit table complete: all S1–S8 rows with named tests, S1–S6 all ✅.
-- [ ] All four spot-check commands recorded with clean results.
+- [ ] Audit table complete: ALL S1–S8 rows ✅ with named tests/config
+      evidence (no open rows — v1 completion gate).
+- [ ] All five spot-checks recorded with clean results.
 - [ ] Runtime dependency tree recorded; no undeclared runtime deps.
 - [ ] Any discovered gap either fixed (with test) or captured as a linked
       new issue in the table.
@@ -77,7 +83,8 @@ release readiness.
 
 ## Dependencies
 
-- 40 (finished surface to audit); effectively all implementation issues.
+- 40 (finished surface), 43 (release workflow — S8), 44 (governance
+  files — S8). (ISSUE_PLAN table: 40, 43, 44.)
 
 ## Non-goals
 
